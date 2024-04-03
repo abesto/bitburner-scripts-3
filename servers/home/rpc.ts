@@ -5,14 +5,14 @@ import { rpcClient } from "rpc/client";
 import { z } from "zod";
 import { fromZodError } from "zod-validation-error";
 import * as PORTS from "rpc/PORTS";
-import { constantCase } from "change-case";
 
 const USAGE = `Usage: rpc <port> <method> [args...]
 
-WARNING: use with --ram-override 1.6 (because change-case has a '.exec' somewhere)
-Like so:
+Make direct RPC calls.
 
-alias rpc="run rpc.js --ram-override 1.6"
+EXAMPLES:
+run rpc.js redis set 0 my-key 42
+run rpc.js 2 get 0 my-key
 `;
 
 const parseArg = (arg: unknown): unknown => {
@@ -26,11 +26,14 @@ const parseArg = (arg: unknown): unknown => {
   }
 };
 
+const cheapConstantCase = (str: string): string =>
+  str.toUpperCase().replaceAll("/(- )+/g", "_");
+
 const parsePort = (raw: number | string): number | undefined => {
   if (typeof raw === "number") {
     return raw;
   }
-  const name = constantCase(raw);
+  const name = cheapConstantCase(raw);
   if (name in PORTS) {
     // @ts-expect-error This is ugly, but it's good enough for the CLI
     // eslint-disable-next-line
