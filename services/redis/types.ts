@@ -34,5 +34,19 @@ export const API = z.object({
     .function()
     .args(z.number().describe("db"), z.string().describe("pattern"))
     .returns(z.string().array()),
+
+  sadd: z
+    .function()
+    .args(
+      z.number().describe("db"),
+      z.string().describe("key"),
+      z.string().array().describe("values").nonempty()
+    )
+    .returns(z.number().describe("number of new members added")),
+
+  smembers: z
+    .function()
+    .args(z.number().describe("db"), z.string().describe("key"))
+    .returns(z.string().array()),
 });
 export type API = z.infer<typeof API>;

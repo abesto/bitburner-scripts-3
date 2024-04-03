@@ -15,6 +15,9 @@ export const main = async (ns: NS) => {
     }
 
     if (Array.isArray(result)) {
+      if (result.length === 0) {
+        return "(empty list or set)";
+      }
       return result
         .map((value, index) => `(${index.toString()}) ${renderResult(value)}`)
         .join("\n");
@@ -51,6 +54,7 @@ export const main = async (ns: NS) => {
   }
 
   const extraArgs = [];
+
   if (command === "set") {
     const setOptions = SetOptions.parse({});
     while (args.length > 2) {
@@ -66,6 +70,11 @@ export const main = async (ns: NS) => {
       }
     }
     extraArgs.push(setOptions);
+  }
+
+  if (command === "sadd") {
+    const values = args.splice(1) as string[];
+    extraArgs.push(values);
   }
 
   try {
