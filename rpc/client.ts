@@ -15,6 +15,7 @@ type Promisify<T> = T extends (...args: unknown[]) => Promise<unknown>
 type PromisifyMethods<T extends object> = {
   [K in keyof T]: Promisify<T[K]>;
 };
+export type RpcClient<T extends object> = PromisifyMethods<T>;
 
 export const rpcClient = <T extends object>(ns: NS, portNumber: number) => {
   const log = new Log(ns, `rpcClient:${portNumber.toString()}`);
@@ -68,5 +69,5 @@ export const rpcClient = <T extends object>(ns: NS, portNumber: number) => {
         };
       },
     }
-  ) as PromisifyMethods<T>;
+  ) as RpcClient<T>;
 };

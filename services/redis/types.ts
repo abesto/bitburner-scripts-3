@@ -10,7 +10,7 @@ export const SetResult = z.discriminatedUnion("setResultType", [
 export type SetResult = z.infer<typeof SetResult>;
 
 export const SetOptions = z.object({
-  get: z.boolean().default(false),
+  get: z.boolean().optional(),
 });
 export type SetOptions = z.infer<typeof SetOptions>;
 
@@ -26,7 +26,7 @@ export const API = z.object({
       z.number().describe("db"),
       z.string().describe("key"),
       z.string().describe("value"),
-      SetOptions
+      SetOptions.optional()
     )
     .returns(SetResult),
 

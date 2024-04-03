@@ -2,7 +2,7 @@ import { BaseService } from "rpc/server";
 import { z } from "zod";
 import { REDIS as PORT } from "rpc/PORTS";
 import { maybeZodErrorMessage } from "lib/error";
-import { API, SetOptions } from "./types";
+import { API, SetOptions, SetResult } from "./types";
 import { Minimatch } from "minimatch";
 
 const BASEDIR = "data/redis";
@@ -45,21 +45,28 @@ export class RedisService extends BaseService implements API {
     this.ns.write(this.dbFile(db), JSON.stringify(this.dbs[db]), "w");
   }
 
-  get = API.shape.get.implement((dbNumber, key) => {
-    const db = this.ensureDb(dbNumber);
-    if (key in db) {
-      return db[key];
+  get: (db: number, key: string) => string | null = API.shape.get.implement(
+    (dbNumber, key) => {
+      const db = this.ensureDb(dbNumber);
+      if (key in db) {
+        return db[key];
+      }
+      return null;
     }
-    return null;
-  });
+  );
 
-  set = API.shape.set.implement(
-    (dbNumber, key, value, options = SetOptions.parse({})) => {
+  set: (
+    db: number,
+    key: string,
+    value: string,
+    options?: SetOptions
+  ) => SetResult = API.shape.set.implement(
+    (dbNumber, key, value, options = {}) => {
       const db = this.ensureDb(dbNumber);
       const oldValue = key in db ? db[key] : null;
       db[key] = value;
       this.writeDb(dbNumber);
-      if (options.get) {
+      if (options.get === true) {
         return { setResultType: "GET", oldValue };
       } else {
         return { setResultType: "OK" };
@@ -67,15 +74,17 @@ export class RedisService extends BaseService implements API {
     }
   );
 
-  keys = API.shape.keys.implement((dbNumber, pattern) => {
-    const db = this.ensureDb(dbNumber);
-    const keys = [];
-    const mm = new Minimatch(pattern);
-    for (const key of Object.keys(db)) {
-      if (mm.match(key)) {
-        keys.push(key);
+  keys: (db: number, pattern: string) => string[] = API.shape.keys.implement(
+    (dbNumber, pattern) => {
+      const db = this.ensureDb(dbNumber);
+      const keys = [];
+      const mm = new Minimatch(pattern);
+      for (const key of Object.keys(db)) {
+        if (mm.match(key)) {
+          keys.push(key);
+        }
       }
+      return keys;
     }
-    return keys;
-  });
+  );
 }
