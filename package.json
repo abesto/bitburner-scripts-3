@@ -7,12 +7,15 @@
   },
   "dependencies": {
     "change-case": "^5.4.3",
+    "clone-deep": "^4.0.1",
     "esbuild": "^0.20.2",
     "esbuild-bitburner-plugin": "^1.5.1",
+    "minimatch": "^9.0.4",
     "zod": "^3.22.4",
     "zod-validation-error": "file:../zod-validation-error"
   },
   "devDependencies": {
+    "@types/clone-deep": "^4.0.4",
     "@types/eslint__js": "^8.42.3",
     "@typescript-eslint/eslint-plugin": "^7.5.0",
     "@typescript-eslint/parser": "^7.5.0",

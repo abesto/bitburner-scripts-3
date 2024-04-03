@@ -17,5 +17,7 @@ export const redisClient = (ns: NS, db = 0) => {
     // Actual Redis commands
     get: inner.get.bind(inner, db),
     set: inner.set.bind(inner, db),
+    keys: inner.keys.bind(inner, db),
   };
 };
+export type RedisClient = ReturnType<typeof redisClient>;

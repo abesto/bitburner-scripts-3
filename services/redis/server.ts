@@ -2,11 +2,12 @@ import { BaseService } from "rpc/server";
 import { z } from "zod";
 import { REDIS as PORT } from "rpc/PORTS";
 import { maybeZodErrorMessage } from "lib/error";
-import { API, RedisValue } from "./types";
+import { API, SetOptions } from "./types";
+import { Minimatch } from "minimatch";
 
 const BASEDIR = "data/redis";
 
-const DB = z.record(RedisValue);
+const DB = z.record(z.string());
 type DB = z.infer<typeof DB>;
 
 export class RedisService extends BaseService implements API {
@@ -46,13 +47,35 @@ export class RedisService extends BaseService implements API {
 
   get = API.shape.get.implement((dbNumber, key) => {
     const db = this.ensureDb(dbNumber);
-    return db[key] ?? null;
+    if (key in db) {
+      return db[key];
+    }
+    return null;
   });
 
-  set = API.shape.set.implement((dbNumber, key, value) => {
+  set = API.shape.set.implement(
+    (dbNumber, key, value, options = SetOptions.parse({})) => {
+      const db = this.ensureDb(dbNumber);
+      const oldValue = key in db ? db[key] : null;
+      db[key] = value;
+      this.writeDb(dbNumber);
+      if (options.get) {
+        return { setResultType: "GET", oldValue };
+      } else {
+        return { setResultType: "OK" };
+      }
+    }
+  );
+
+  keys = API.shape.keys.implement((dbNumber, pattern) => {
     const db = this.ensureDb(dbNumber);
-    db[key] = value;
-    this.writeDb(dbNumber);
-    return "OK";
+    const keys = [];
+    const mm = new Minimatch(pattern);
+    for (const key of Object.keys(db)) {
+      if (mm.match(key)) {
+        keys.push(key);
+      }
+    }
+    return keys;
   });
 }
