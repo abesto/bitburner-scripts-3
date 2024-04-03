@@ -1,25 +1,24 @@
 {
-  "name": "bb-external-editor",
-  "version": "1.0.0",
-  "description": "template for external editors for the game bitburner",
-  "main": "index.js",
+  "name": "bitburner-scripts-3",
+  "version": "0.0.0",
+  "type": "module",
   "scripts": {
     "start": "node ./build.mjs"
   },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/shyguy1412/bb-external-editor.git"
-  },
-  "author": "Nils Ramstöck",
-  "license": "MIT",
-  "bugs": {
-    "url": "https://github.com/shyguy1412/bb-external-editor/issues"
-  },
-  "homepage": "https://github.com/shyguy1412/bb-external-editor#readme",
   "dependencies": {
-    "@types/react": "^18.2.65",
-    "@types/react-dom": "^18.2.21",
-    "esbuild": "^0.19.12",
-    "esbuild-bitburner-plugin": "^1.5.0"
+    "change-case": "^5.4.3",
+    "esbuild": "^0.20.2",
+    "esbuild-bitburner-plugin": "^1.5.1",
+    "zod": "^3.22.4",
+    "zod-validation-error": "file:../zod-validation-error"
+  },
+  "devDependencies": {
+    "@types/eslint__js": "^8.42.3",
+    "@typescript-eslint/eslint-plugin": "^7.5.0",
+    "@typescript-eslint/parser": "^7.5.0",
+    "esbuild-plugin-eslint": "^0.3.12",
+    "eslint": "^8.57.0",
+    "typescript": "^5.4.3",
+    "typescript-eslint": "^7.5.0"
   }
 }
