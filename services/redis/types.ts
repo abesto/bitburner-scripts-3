@@ -30,6 +30,30 @@ export const API = z.object({
     )
     .returns(SetResult),
 
+  del: z
+    .function()
+    .args(
+      z.number().describe("db"),
+      z.string().array().nonempty().describe("keys")
+    )
+    .returns(z.number().describe("number of keys removed")),
+
+  mset: z
+    .function()
+    .args(
+      z.number().describe("db"),
+      z.record(z.string().describe("key"), z.string().describe("value"))
+    )
+    .returns(z.literal("OK")),
+
+  mget: z
+    .function()
+    .args(
+      z.number().describe("db"),
+      z.string().array().describe("keys").nonempty()
+    )
+    .returns(z.string().nullable().array()),
+
   keys: z
     .function()
     .args(z.number().describe("db"), z.string().describe("pattern"))
@@ -48,5 +72,14 @@ export const API = z.object({
     .function()
     .args(z.number().describe("db"), z.string().describe("key"))
     .returns(z.string().array()),
+
+  srem: z
+    .function()
+    .args(
+      z.number().describe("db"),
+      z.string().describe("key"),
+      z.string().array().describe("values").nonempty()
+    )
+    .returns(z.number().describe("number of members removed")),
 });
 export type API = z.infer<typeof API>;

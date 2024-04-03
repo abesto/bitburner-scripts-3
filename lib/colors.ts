@@ -30,7 +30,7 @@ export function cyan(text: string): string {
   return CYAN + text + RESET;
 }
 export function white(text: string): string {
-  return WHITE + text + RESET;
+  return WHITE + text + GREEN;
 }
 
 export const fg256 = (r: number, g: number, b: number) => (text: string) => {

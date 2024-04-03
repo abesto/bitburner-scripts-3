@@ -13,8 +13,15 @@ type DB = z.infer<typeof DB>;
 export class RedisService extends BaseService implements API {
   private dbs: Record<number, DB> = {};
 
-  getPortNumber() {
+  override getPortNumber() {
     return PORT;
+  }
+
+  override setup() {
+    for (const db of [0, 1, 2, 3, 4]) {
+      this.ensureDb(db);
+    }
+    return Promise.resolve();
   }
 
   dbFile(db: number) {
@@ -28,8 +35,15 @@ export class RedisService extends BaseService implements API {
     }
     try {
       return z
-        .record(z.union([z.string(), z.string().array()]))
-        .transform((x) => (Array.isArray(x) ? new Set(x) : x))
+        .record(
+          z.union([
+            z.string(),
+            z
+              .string()
+              .array()
+              .transform((x) => new Set(x)),
+          ])
+        )
         .pipe(DB)
         .parse(JSON.parse(raw));
     } catch (error) {
@@ -92,6 +106,41 @@ export class RedisService extends BaseService implements API {
     }
   );
 
+  del: (db: number, keys: [string, ...string[]]) => number =
+    API.shape.del.implement((dbNumber, keys) => {
+      const db = this.ensureDb(dbNumber);
+      let removed = 0;
+      for (const key of keys) {
+        if (key in db) {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete db[key];
+          removed++;
+        }
+      }
+      this.writeDb(dbNumber);
+      return removed;
+    });
+
+  mset: (db: number, keyValues: Record<string, string>) => "OK" =
+    API.shape.mset.implement((dbNumber, keyValues) => {
+      const db = this.ensureDb(dbNumber);
+      for (const [key, value] of Object.entries(keyValues)) {
+        db[key] = value;
+      }
+      this.writeDb(dbNumber);
+      return "OK";
+    });
+
+  mget: (db: number, keys: [string, ...string[]]) => (string | null)[] =
+    API.shape.mget.implement((dbNumber, keys) => {
+      const db = this.ensureDb(dbNumber);
+      const values: (string | null)[] = [];
+      for (const key of keys) {
+        values.push(z.string().nullish().parse(db[key]) ?? null);
+      }
+      return values;
+    });
+
   keys: (db: number, pattern: string) => string[] = API.shape.keys.implement(
     (dbNumber, pattern) => {
       const db = this.ensureDb(dbNumber);
@@ -106,11 +155,15 @@ export class RedisService extends BaseService implements API {
     }
   );
 
+  private lookupSet(db: DB, key: string): Set<string> {
+    return z.set(z.string()).parse(db[key] ?? new Set());
+  }
+
   sadd: (db: number, key: string, values: [string, ...string[]]) => number =
     API.shape.sadd.implement((dbNumber, key, values) => {
       const db = this.ensureDb(dbNumber);
 
-      const set = z.set(z.string()).parse(db[key] ?? new Set());
+      const set = this.lookupSet(db, key);
       let added = 0;
       for (const value of values) {
         if (!set.has(value)) {
@@ -128,7 +181,24 @@ export class RedisService extends BaseService implements API {
   smembers: (db: number, key: string) => string[] =
     API.shape.smembers.implement((dbNumber, key) => {
       const db = this.ensureDb(dbNumber);
-      const set = z.set(z.string()).parse(db[key] ?? new Set());
+      const set = this.lookupSet(db, key);
       return Array.from(set);
+    });
+
+  srem: (db: number, key: string, values: [string, ...string[]]) => number =
+    API.shape.srem.implement((dbNumber, key, values) => {
+      const db = this.ensureDb(dbNumber);
+
+      const set = this.lookupSet(db, key);
+      let removed = 0;
+      for (const value of values) {
+        if (set.delete(value)) {
+          removed++;
+        }
+      }
+
+      this.writeDb(dbNumber);
+
+      return removed;
     });
 }

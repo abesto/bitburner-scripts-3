@@ -29,6 +29,11 @@ export abstract class BaseService {
     // Override to register timers at construction time
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  protected async setup(): Promise<void> {
+    // Override to run code just before starting to serve requests
+  }
+
   protected maxTimeSlice(): number {
     return 100;
   }
@@ -137,6 +142,7 @@ export abstract class BaseService {
 
   async listen(): Promise<void> {
     this.clearPortIfNeeded();
+    await this.setup();
     this.log.info("listening", { port: this.listenPort.portNumber });
 
     const buffer = [];

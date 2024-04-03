@@ -6,6 +6,7 @@
     "start": "node ./build.mjs"
   },
   "dependencies": {
+    "array-shuffle": "^3.0.0",
     "change-case": "^5.4.3",
     "clone-deep": "^4.0.1",
     "esbuild": "^0.20.2",

@@ -11,7 +11,7 @@ export const API = z.object({
 export type API = z.infer<typeof API>;
 
 export class <%= h.changeCase.pascal(name) %>Service extends BaseService implements API {
-  getPortNumber() {
+  override getPortNumber() {
     return PORT;
   }
   echo = API.shape.echo.implement((message) => message);

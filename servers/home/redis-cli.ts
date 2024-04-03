@@ -72,9 +72,11 @@ export const main = async (ns: NS) => {
     extraArgs.push(setOptions);
   }
 
-  if (command === "sadd") {
+  if (command === "sadd" || command === "srem") {
     const values = args.splice(1) as string[];
     extraArgs.push(values);
+  } else if (command === "del") {
+    extraArgs.push(args.splice(0));
   }
 
   try {
