@@ -55,6 +55,26 @@ export const main = async (ns: NS) => {
 
   const extraArgs = [];
 
+  const buildKeyValues = (keyValuesRaw: unknown): Record<string, string> => {
+    const keyValues = z.string().array().parse(keyValuesRaw);
+    const obj: Record<string, string> = {};
+    for (let i = 0; i < args.length; i += 2) {
+      const key = z.string().safeParse(keyValues[i]);
+      const value = z.string().safeParse(keyValues[i + 1]);
+      if (!key.success || !value.success) {
+        log.terror("cli: invalid key/field or value", {
+          key: keyValues[i],
+          value: keyValues[i + 1],
+          error:
+            (key.success ? "" : maybeZodErrorMessage(key.error)) +
+            (value.success ? "" : maybeZodErrorMessage(value.error)),
+        });
+        throw new Error("Invalid key/field or value");
+      }
+    }
+    return obj;
+  };
+
   if (command === "set") {
     const setOptions = SetOptions.parse({});
     while (args.length > 2) {
@@ -70,32 +90,16 @@ export const main = async (ns: NS) => {
       }
     }
     extraArgs.push(setOptions);
-  }
-
-  if (command === "sadd" || command === "srem") {
+  } else if (command === "sadd" || command === "srem") {
     const values = args.splice(1) as string[];
     extraArgs.push(values);
   } else if (command === "del" || command === "mget") {
     extraArgs.push(args.splice(0));
   } else if (command === "mset") {
-    const keyValues = args.splice(0) as string[];
-    const obj: Record<string, string> = {};
-    for (let i = 0; i < keyValues.length; i += 2) {
-      const key = z.string().safeParse(keyValues[i]);
-      const value = z.string().safeParse(keyValues[i + 1]);
-      if (!key.success || !value.success) {
-        log.terror("cli: invalid mset key or value", {
-          key: keyValues[i],
-          value: keyValues[i + 1],
-          error:
-            (key.success ? "" : maybeZodErrorMessage(key.error)) +
-            (value.success ? "" : maybeZodErrorMessage(value.error)),
-        });
-        return;
-      }
-
-      obj[key.data] = value.data;
-    }
+    const obj = buildKeyValues(args.splice(0));
+    extraArgs.push(obj);
+  } else if (command === "xadd") {
+    const obj = buildKeyValues(args.splice(2));
     extraArgs.push(obj);
   }
 

@@ -1,8 +1,9 @@
 import { BaseService } from "rpc/server";
 import { REDIS as PORT } from "rpc/PORTS";
-import { API, SetOptions, SetResult } from "./types";
+import { API, SetOptions, SetResult, StreamID } from "./types";
 import { Minimatch } from "minimatch";
 import { CachedRedisStorage } from "./storage";
+import { TrieMap } from "mnemonist";
 
 export class RedisService extends BaseService implements API {
   private storage: CachedRedisStorage;
@@ -81,7 +82,7 @@ export class RedisService extends BaseService implements API {
 
   sadd: (db: number, key: string, values: [string, ...string[]]) => number =
     API.shape.sadd.implement((db, key, values) => {
-      const set = this.storage.read(db, "set", key);
+      const set = this.storage.read(db, "set", key) ?? new Set<string>();
 
       let added = 0;
       for (const value of values) {
@@ -98,12 +99,19 @@ export class RedisService extends BaseService implements API {
 
   smembers: (db: number, key: string) => string[] =
     API.shape.smembers.implement((db, key) => {
-      return Array.from(this.storage.read(db, "set", key));
+      const set = this.storage.read(db, "set", key);
+      if (set === null) {
+        return [];
+      }
+      return Array.from(set);
     });
 
   srem: (db: number, key: string, values: [string, ...string[]]) => number =
     API.shape.srem.implement((db, key, values) => {
       const set = this.storage.read(db, "set", key);
+      if (set === null) {
+        return 0;
+      }
 
       let removed = 0;
       for (const value of values) {
@@ -115,4 +123,28 @@ export class RedisService extends BaseService implements API {
       this.storage.write(db, "set", key, set);
       return removed;
     });
+
+  xadd: (
+    db: number,
+    key: string,
+    streamId: StreamID,
+    fieldValues: Record<string, string>
+  ) => string = API.shape.xadd.implement((db, key, streamId, fieldValues) => {
+    const stream = this.storage.read(db, "stream", key) ?? new TrieMap();
+
+    if (streamId === "*") {
+      const timestamp = Date.now().toString();
+      const existing = stream.find(timestamp);
+      streamId = `${timestamp}-${existing.length.toString()}`;
+    }
+    stream.set(streamId, fieldValues);
+    this.storage.write(db, "stream", key, stream);
+    return streamId;
+  });
+
+  xlen: (db: number, key: string) => number = API.shape.xlen.implement(
+    (db, key) => {
+      return this.storage.read(db, "stream", key)?.size || 0;
+    }
+  );
 }

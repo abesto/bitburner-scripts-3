@@ -12,6 +12,7 @@
     "esbuild": "^0.20.2",
     "esbuild-bitburner-plugin": "^1.5.1",
     "minimatch": "^9.0.4",
+    "mnemonist": "^0.39.8",
     "zod": "^3.22.4",
     "zod-validation-error": "file:../zod-validation-error"
   },

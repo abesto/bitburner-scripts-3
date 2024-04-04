@@ -80,6 +80,7 @@ export abstract class BaseService {
     } catch (error) {
       this.log.error("execute-error", {
         error: maybeZodErrorMessage(error),
+        stack: error instanceof Error ? error.stack : undefined,
         msgId,
         method: methodName,
         args,
