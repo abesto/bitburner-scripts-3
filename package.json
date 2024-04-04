@@ -7,7 +7,7 @@
   },
   "dependencies": {
     "array-shuffle": "^3.0.0",
-    "change-case": "^5.4.3",
+    "change-case": "^5.4.4",
     "clone-deep": "^4.0.1",
     "esbuild": "^0.20.2",
     "esbuild-bitburner-plugin": "^1.5.1",
