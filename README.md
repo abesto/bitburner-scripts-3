@@ -1,6 +1,6 @@
-# bb-external-editor
+# bitburner-scripts-3
 
-This is a template for using any external editor for Bitburner. This Template supports JS, JSX, TS and TSX out of the box.
+_Template: https://github.com/shyguy1412/bb-external-editor/. Trimmed from the template follows_
 
 ## How to get started
 
@@ -23,51 +23,39 @@ For more in-depth details and a full list of options have a look at the [plugin]
 
 This template uses [esbuild](https://esbuild.github.io/) to bundle your scripts.
 
-### Using React
-
-This template allows you to use the ingame instances of `React` and `ReactDOM` simply by importing them as ESModule as you usually would.
-
-```jsx
-import React, {useState} from 'react';
-
-export function MyComponent(){
-  const [count, setCount] = useState(0);
-
-  return <div>Count {count} <button onClick={() => setCount(count + 1)}>Add to count</button></div>;
-}
-
-```
-
 ### Developing on multiple servers
 
 Simply create a new folder with the name of the server you want to develop on in the 'servers' directory to start developing on that server!
 
 ### Bidirectional Mirroring
 
-You can enable mirroring like this  
+You can enable mirroring like this
 
 ```js
-const createContext = async () => await context({
-  entryPoints: [
-    'servers/**/*.js',
-    'servers/**/*.jsx',
-    'servers/**/*.ts',
-    'servers/**/*.tsx',
-  ],
-  outbase: "./servers",
-  outdir: "./build",
-  plugins: [BitburnerPlugin({
-    port: 12525,
-    types: 'NetscriptDefinitions.d.ts',
-    mirror: {
-      'local/path': ['home', 'and/or other servers']
-    }
-  })],
-  bundle: true,
-  format: 'esm',
-  platform: 'browser',
-  logLevel: 'info'
-});
+const createContext = async () =>
+  await context({
+    entryPoints: [
+      "servers/**/*.js",
+      "servers/**/*.jsx",
+      "servers/**/*.ts",
+      "servers/**/*.tsx",
+    ],
+    outbase: "./servers",
+    outdir: "./build",
+    plugins: [
+      BitburnerPlugin({
+        port: 12525,
+        types: "NetscriptDefinitions.d.ts",
+        mirror: {
+          "local/path": ["home", "and/or other servers"],
+        },
+      }),
+    ],
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    logLevel: "info",
+  });
 
 let ctx = await createContext();
 ctx.watch();
@@ -81,31 +69,33 @@ While mirroring, all changes in the game will be synced with your editor and vic
 You can specify folders with a list of servers to automatically distribute your files to these servers like this:
 
 ```js
-const createContext = async () => await context({
-  entryPoints: [
-    'servers/**/*.js',
-    'servers/**/*.jsx',
-    'servers/**/*.ts',
-    'servers/**/*.tsx',
-  ],
-  outbase: "./servers",
-  outdir: "./build",
-  plugins: [BitburnerPlugin({
-    port: 12525,
-    types: 'NetscriptDefinitions.d.ts',
-    distribute: {
-      'build/home/dist': ['server-1', 'server-2', 'server-3']
-    }
-  })],
-  bundle: true,
-  format: 'esm',
-  platform: 'browser',
-  logLevel: 'info'
-});
+const createContext = async () =>
+  await context({
+    entryPoints: [
+      "servers/**/*.js",
+      "servers/**/*.jsx",
+      "servers/**/*.ts",
+      "servers/**/*.tsx",
+    ],
+    outbase: "./servers",
+    outdir: "./build",
+    plugins: [
+      BitburnerPlugin({
+        port: 12525,
+        types: "NetscriptDefinitions.d.ts",
+        distribute: {
+          "build/home/dist": ["server-1", "server-2", "server-3"],
+        },
+      }),
+    ],
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    logLevel: "info",
+  });
 
 let ctx = await createContext();
 ctx.watch();
-
 ```
 
 In this example all files that are developed in 'servers/home/dist' will not only be uploaded to 'home' but also 'server-1', 'server-2' and 'server-3'.
@@ -115,43 +105,53 @@ In this example all files that are developed in 'servers/home/dist' will not onl
 You can provide plugin extensions with hooks that trigger before and after certain events. Within hooks that gurantee that the plugin is connected to the game, you also get full access to the remote file API. Using extensions would look something like this:
 
 ```js
-import { context } from 'esbuild';
-import { BitburnerPlugin } from 'esbuild-bitburner-plugin';
+import { context } from "esbuild";
+import { BitburnerPlugin } from "esbuild-bitburner-plugin";
 
 /** @type import('esbuild-bitburner-plugin').PluginExtension*/
 const customExtension = {
-  setup() { console.log('setup'); }, //Run once on plugin startup
+  setup() {
+    console.log("setup");
+  }, //Run once on plugin startup
 
-  beforeConnect() { console.log('beforeConnect'); }, //Run once before the game connects
-  afterConnect(remoteAPI) { console.log('afterConnect'); }, //Run every time after the game (re)connects
+  beforeConnect() {
+    console.log("beforeConnect");
+  }, //Run once before the game connects
+  afterConnect(remoteAPI) {
+    console.log("afterConnect");
+  }, //Run every time after the game (re)connects
 
-  beforeBuild() { console.log('beforeBuild'); }, //Run before every build process
-  afterBuild(remoteAPI) { console.log('afterBuild'); }, //Run after build results have been uploaded into the game
+  beforeBuild() {
+    console.log("beforeBuild");
+  }, //Run before every build process
+  afterBuild(remoteAPI) {
+    console.log("afterBuild");
+  }, //Run after build results have been uploaded into the game
 };
 
-const createContext = async () => await context({
-  entryPoints: [
-    'servers/**/*.js',
-    'servers/**/*.jsx',
-    'servers/**/*.ts',
-    'servers/**/*.tsx',
-  ],
-  outbase: "./servers",
-  outdir: "./build",
-  plugins: [
-    BitburnerPlugin({
-      port: 12525,
-      types: 'NetscriptDefinitions.d.ts',
-      extensions: [customExtension]
-    })
-  ],
-  bundle: true,
-  format: 'esm',
-  platform: 'browser',
-  logLevel: 'info'
-});
+const createContext = async () =>
+  await context({
+    entryPoints: [
+      "servers/**/*.js",
+      "servers/**/*.jsx",
+      "servers/**/*.ts",
+      "servers/**/*.tsx",
+    ],
+    outbase: "./servers",
+    outdir: "./build",
+    plugins: [
+      BitburnerPlugin({
+        port: 12525,
+        types: "NetscriptDefinitions.d.ts",
+        extensions: [customExtension],
+      }),
+    ],
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    logLevel: "info",
+  });
 
 let ctx = await createContext();
 ctx.watch();
-
 ```
