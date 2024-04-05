@@ -1,5 +1,6 @@
 import { z } from "zod";
 import RedisConfig from "./configlib-redis/RedisConfig";
+import { LogLevel } from "./log";
 
 const rawShape = {
   foo: z.string(),
@@ -16,5 +17,9 @@ const defaults: ConfigShape = {
 };
 
 const mkConfig = (ns: NS) => new RedisConfig(ns, rawShape, defaults);
+
+export const LOGLEVELS: Record<string, LogLevel> = {
+  "rpcClient:2": LogLevel.INFO,
+};
 
 export default mkConfig;

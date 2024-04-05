@@ -1,4 +1,5 @@
 import * as colors from "./colors";
+import { LOGLEVELS } from "./config";
 import { formatKeyvalue } from "./fmt";
 
 export enum LogLevel {
@@ -7,6 +8,13 @@ export enum LogLevel {
   WARN = "WARN",
   ERROR = "ERROR",
 }
+
+const LOGLEVEL_ORDER = {
+  [LogLevel.DEBUG]: 0,
+  [LogLevel.INFO]: 1,
+  [LogLevel.WARN]: 2,
+  [LogLevel.ERROR]: 3,
+};
 
 export class Log {
   constructor(private readonly ns: NS, private readonly name: string) {
@@ -63,7 +71,12 @@ export class Log {
     message: string,
     keyvalue: Record<string, unknown>
   ): void {
-    this.ns.printf("%s", this.format(level, message, keyvalue));
+    if (
+      LOGLEVEL_ORDER[level] >=
+      LOGLEVEL_ORDER[LOGLEVELS[this.name] ?? LogLevel.DEBUG]
+    ) {
+      this.ns.printf("%s", this.format(level, message, keyvalue));
+    }
   }
 
   debug(message: string, keyvalue: Record<string, unknown> = {}): void {
