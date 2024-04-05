@@ -55,9 +55,11 @@ export interface IRedisStorage {
   ): void;
   del(db: number, keys: string[]): number;
   keys(db: number): string[];
+  exists(db: number, key: string): boolean;
+  persist(): void;
 }
 
-export class RedisStorage implements IRedisStorage {
+export class DirectRedisStorage implements IRedisStorage {
   constructor(private readonly ns: NS) {}
 
   path(db: number, key: string): string {
@@ -88,7 +90,7 @@ export class RedisStorage implements IRedisStorage {
   del(db: number, keys: string[]): number {
     let removed = 0;
     for (const key of keys) {
-      if (this.ns.fileExists(this.path(db, key))) {
+      if (!this.exists(db, key)) {
         this.ns.rm(this.path(db, key));
         removed++;
       }
@@ -103,19 +105,50 @@ export class RedisStorage implements IRedisStorage {
       .ls(this.ns.getHostname(), `${BASEDIR}/${db.toString()}`)
       .map((path) => path.slice(prefix.length, -suffix.length));
   }
-}
 
-export class CachedRedisStorage implements IRedisStorage {
-  private readonly storage: RedisStorage;
-  private readonly cache: Map<string, unknown>;
-
-  constructor(ns: NS) {
-    this.storage = new RedisStorage(ns);
-    this.cache = new Map();
+  exists(db: number, key: string): boolean {
+    return this.ns.fileExists(this.path(db, key));
   }
 
-  cacheKey(db: number, key: string): string {
-    return `${db.toString()}:${key}`;
+  persist(): void {
+    // This implementation writes to disk on each operation, so persist() is a no-op
+  }
+}
+
+type TypeCache<T extends keyof typeof INTERNAL> = Map<
+  string,
+  z.output<(typeof INTERNAL)[T]> | null
+>;
+type DbCache = {
+  [T in keyof typeof INTERNAL]: TypeCache<T>;
+};
+const mkDbCache = (): DbCache =>
+  Object.fromEntries(TYPE_NAMES.map((type) => [type, new Map()])) as DbCache;
+type MultiDbCache = Map<number, DbCache>;
+
+export class CachedRedisStorage implements IRedisStorage {
+  private readonly storage: DirectRedisStorage;
+  private readonly cache: MultiDbCache;
+  private readonly dirty: Set<[number, keyof typeof INTERNAL, string]>;
+
+  constructor(ns: NS) {
+    this.storage = new DirectRedisStorage(ns);
+    this.cache = new Map();
+    this.dirty = new Set();
+  }
+
+  dbCache(db: number): DbCache {
+    const existing = this.cache.get(db);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const dbCache = mkDbCache();
+    this.cache.set(db, dbCache);
+    return dbCache;
+  }
+
+  getCache<T extends keyof typeof INTERNAL>(db: number, type: T): TypeCache<T> {
+    return this.dbCache(db)[type];
   }
 
   read<T extends keyof typeof INTERNAL>(
@@ -123,16 +156,18 @@ export class CachedRedisStorage implements IRedisStorage {
     type: T,
     key: string
   ): (z.output<(typeof INTERNAL)[T]> & z.output<(typeof DESER)[T]>) | null {
-    const cacheKey = this.cacheKey(db, key);
-    if (this.cache.has(cacheKey)) {
-      const cachedValue = this.cache.get(cacheKey);
+    const cache = this.getCache(db, type);
+    const cachedValue = cache.get(key);
+
+    if (cachedValue !== undefined) {
       if (cachedValue === null) {
         return null;
       }
-      return INTERNAL[type].parse(this.cache.get(cacheKey));
+      return INTERNAL[type].parse(cachedValue);
     }
+
     const value = this.storage.read(db, type, key);
-    this.cache.set(cacheKey, value);
+    cache.set(key, value);
     return value;
   }
 
@@ -143,21 +178,47 @@ export class CachedRedisStorage implements IRedisStorage {
     value: z.input<(typeof SER)[T]> & z.input<(typeof INTERNAL)[T]>
   ): void {
     const parsed = INTERNAL[type].parse(value);
-    this.storage.write(db, type, key, parsed);
-    const cacheKey = this.cacheKey(db, key);
-    this.cache.set(cacheKey, parsed);
+    this.dirty.add([db, type, key]);
+    this.getCache(db, type).set(key, parsed);
   }
 
   del(db: number, keys: string[]): number {
     const removed = this.storage.del(db, keys);
     for (const key of keys) {
-      this.cache.delete(this.cacheKey(db, key));
+      for (const type of TYPE_NAMES) {
+        this.getCache(db, type).delete(key);
+      }
     }
     return removed;
   }
 
   keys(db: number): string[] {
     return this.storage.keys(db);
+  }
+
+  exists(db: number, key: string): boolean {
+    for (const type of TYPE_NAMES) {
+      if (this.getCache(db, type).has(key)) {
+        return true;
+      }
+    }
+    return this.storage.exists(db, key);
+  }
+
+  persist() {
+    for (const [db, type, key] of this.dirty) {
+      const value = this.getCache(db, type).get(key);
+      if (value === undefined) {
+        // Was written since the last persist(), and was then deleted (and was not re-created)
+        continue;
+      }
+      if (value === null) {
+        throw new Error("dirty null value in cache, this should never happen");
+      } else {
+        this.storage.write(db, type, key, value);
+      }
+    }
+    this.dirty.clear();
   }
 }
 
@@ -173,7 +234,7 @@ export class MemoryRedisStorage implements IRedisStorage {
     type: T,
     key: string
   ): (z.output<(typeof INTERNAL)[T]> & z.output<(typeof DESER)[T]>) | null {
-    const value = this.storage.get(`${db}:${key}`);
+    const value = this.storage.get(`${db.toString()}:${key}`);
     if (value === undefined) {
       return null;
     }
@@ -186,14 +247,14 @@ export class MemoryRedisStorage implements IRedisStorage {
     key: string,
     value: z.input<(typeof SER)[T]> & z.input<(typeof INTERNAL)[T]>
   ): void {
-    this.storage.set(`${db}:${key}`, SER[type].parse(value));
+    this.storage.set(`${db.toString()}:${key}`, SER[type].parse(value));
   }
 
   del(db: number, keys: string[]): number {
     let removed = 0;
     for (const key of keys) {
-      if (this.storage.has(`${db}:${key}`)) {
-        this.storage.delete(`${db}:${key}`);
+      if (this.storage.has(`${db.toString()}:${key}`)) {
+        this.storage.delete(`${db.toString()}:${key}`);
         removed++;
       }
     }
@@ -202,7 +263,15 @@ export class MemoryRedisStorage implements IRedisStorage {
 
   keys(db: number): string[] {
     return Array.from(this.storage.keys())
-      .filter((key) => key.startsWith(`${db}:`))
+      .filter((key) => key.startsWith(`${db.toString()}:`))
       .map((key) => key.split(":")[1] as string);
+  }
+
+  exists(db: number, key: string): boolean {
+    return this.storage.has(`${db.toString()}:${key}`);
+  }
+
+  persist() {
+    // No-op
   }
 }

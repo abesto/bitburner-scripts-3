@@ -11,6 +11,7 @@ import {
 import { Minimatch } from "minimatch";
 import { CachedRedisStorage, IRedisStorage, TYPE_NAMES } from "./storage";
 import { Stream } from "./stream";
+import { TimerManager } from "lib/TimerManager";
 
 export class RedisService extends BaseService implements API {
   constructor(
@@ -24,6 +25,12 @@ export class RedisService extends BaseService implements API {
     return PORT;
   }
 
+  protected override registerTimers(timers: TimerManager): void {
+    timers.setInterval(() => {
+      this.storage.persist();
+    }, 1000);
+  }
+
   get: (db: number, key: string) => string | null = API.shape.get.implement(
     (db, key) => {
       return this.storage.read(db, "string", key);
@@ -35,18 +42,30 @@ export class RedisService extends BaseService implements API {
     key: string,
     value: string,
     options?: SetOptions
-  ) => SetResult = API.shape.set.implement((db, key, value, options = {}) => {
-    let oldValue: string | undefined | null;
-    if (options.get === true) {
-      oldValue = this.storage.read(db, "string", key);
-    }
-    this.storage.write(db, "string", key, value);
-    if (options.get === true) {
-      return { setResultType: "GET", oldValue: oldValue ?? null };
-    } else {
-      return { setResultType: "OK" };
-    }
-  });
+  ) => SetResult = (db, key, value, options) =>
+    API.shape.set.implement((db, key, value, options) => {
+      let oldValue: string | undefined | null;
+      if (options.get === true) {
+        oldValue = this.storage.read(db, "string", key);
+      }
+      this.storage.write(db, "string", key, value);
+      if (options.get === true) {
+        return { setResultType: "GET", oldValue: oldValue ?? null };
+      } else {
+        return { setResultType: "OK" };
+      }
+    })(db, key, value, options ?? {});
+
+  exists: (db: number, keys: [string, ...string[]]) => number =
+    API.shape.exists.implement((db, keys) => {
+      let count = 0;
+      for (const key of keys) {
+        if (this.storage.read(db, "string", key) !== null) {
+          count++;
+        }
+      }
+      return count;
+    });
 
   del: (db: number, keys: [string, ...string[]]) => number =
     API.shape.del.implement((db, keys) => {
@@ -161,7 +180,7 @@ export class RedisService extends BaseService implements API {
     start: string,
     end?: string,
     count?: number
-  ) => RawStream = (db, key, start, end?, count?) =>
+  ) => RawStream = (db, key, start, end, count) =>
     API.shape.xrange.implement((db, key, start, end, count) => {
       const stream = this.storage.read(db, "stream", key);
       if (stream === null) {

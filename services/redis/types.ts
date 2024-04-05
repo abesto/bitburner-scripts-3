@@ -47,8 +47,10 @@ export const API = z.object({
 
   set: z
     .function()
-    .args(db, key, z.string().describe("value"), SetOptions.optional())
+    .args(db, key, z.string().describe("value"), SetOptions)
     .returns(SetResult),
+
+  exists: z.function().args(db, key.array().nonempty()).returns(z.number()),
 
   del: z
     .function()
