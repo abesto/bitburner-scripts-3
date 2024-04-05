@@ -1,11 +1,11 @@
-/* eslint-env node */
 module.exports = {
   extends: [
     "eslint:recommended",
     "plugin:@typescript-eslint/strict-type-checked",
     "plugin:@typescript-eslint/stylistic",
+    "plugin:vitest/recommended",
   ],
-  plugins: ["@typescript-eslint"],
+  plugins: ["@typescript-eslint", "vitest"],
   parser: "@typescript-eslint/parser",
   parserOptions: {
     project: true,
@@ -16,5 +16,6 @@ module.exports = {
     "/build/**",
     "/node_modules/**",
     "/NetscriptDefinitions.d.ts",
+    "/.eslintrc.cjs",
   ],
 };

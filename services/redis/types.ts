@@ -1,5 +1,5 @@
-import { TrieMap } from "mnemonist";
 import { z } from "zod";
+import { Stream } from "./stream";
 
 export const SetResult = z.discriminatedUnion("setResultType", [
   z.object({ setResultType: z.literal("OK") }),
@@ -15,7 +15,9 @@ export const SetOptions = z.object({
 });
 export type SetOptions = z.infer<typeof SetOptions>;
 
-export const StreamEntry = z.record(z.string());
+export const StreamEntry = z
+  .tuple([z.string().describe("field"), z.string().describe("value")])
+  .array();
 export type StreamEntry = z.infer<typeof StreamEntry>;
 
 export const streamIdRegex = /^(\d+)-(\d+)$/;
@@ -24,10 +26,15 @@ export const StreamID = z.string().refine((s) => streamIdRegex.test(s), {
 });
 export type StreamID = z.infer<typeof StreamID>;
 
-export type Stream = TrieMap<string, StreamEntry>;
-export const Stream = z.custom<Stream>((val) => val instanceof TrieMap, {
-  message: "Not a TrieMap",
-});
+export const RawStream = z.tuple([StreamID, StreamEntry]).array();
+export type RawStream = z.infer<typeof RawStream>;
+
+export const streamSchema = z.custom<Stream>(
+  (value) => value instanceof Stream,
+  {
+    message: "Not an instance of Stream",
+  }
+);
 
 const db = z.number().describe("db");
 const key = z.string().describe("key");
@@ -81,10 +88,36 @@ export const API = z.object({
       db,
       key,
       z.union([z.literal("*"), StreamID]).describe("stream id"),
-      z.record(z.string()).describe("field - value 'pairs'")
+      StreamEntry
     )
     .returns(z.string()),
 
   xlen: z.function().args(db, key).returns(z.number()),
+
+  xrange: z
+    .function()
+    .args(
+      db,
+      key,
+      z.string().describe("start"),
+      z.string().describe("end"),
+      z.number().describe("count")
+    )
+    .returns(RawStream),
+
+  type: z
+    .function()
+    .args(db, key)
+    .returns(
+      z.union([
+        z.literal("string"),
+        z.literal("set"),
+        z.literal("stream"),
+        z.literal("list"),
+        z.literal("none"),
+        z.literal("zset"),
+        z.literal("hash"),
+      ])
+    ),
 });
 export type API = z.infer<typeof API>;

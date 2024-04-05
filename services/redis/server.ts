@@ -1,16 +1,23 @@
 import { BaseService } from "rpc/server";
 import { REDIS as PORT } from "rpc/PORTS";
-import { API, SetOptions, SetResult, StreamID } from "./types";
+import {
+  API,
+  RawStream,
+  SetOptions,
+  SetResult,
+  StreamEntry,
+  StreamID,
+} from "./types";
 import { Minimatch } from "minimatch";
-import { CachedRedisStorage } from "./storage";
-import { TrieMap } from "mnemonist";
+import { CachedRedisStorage, IRedisStorage, TYPE_NAMES } from "./storage";
+import { Stream } from "./stream";
 
 export class RedisService extends BaseService implements API {
-  private storage: CachedRedisStorage;
-
-  constructor(ns: NS) {
+  constructor(
+    ns: NS,
+    private readonly storage: IRedisStorage = new CachedRedisStorage(ns)
+  ) {
     super(ns);
-    this.storage = new CachedRedisStorage(ns);
   }
 
   override getPortNumber() {
@@ -128,23 +135,52 @@ export class RedisService extends BaseService implements API {
     db: number,
     key: string,
     streamId: StreamID,
-    fieldValues: Record<string, string>
+    fieldValues: StreamEntry
   ) => string = API.shape.xadd.implement((db, key, streamId, fieldValues) => {
-    const stream = this.storage.read(db, "stream", key) ?? new TrieMap();
+    const stream = this.storage.read(db, "stream", key) ?? new Stream();
 
     if (streamId === "*") {
       const timestamp = Date.now().toString();
-      const existing = stream.find(timestamp);
+      const existing = stream.prefix(timestamp);
       streamId = `${timestamp}-${existing.length.toString()}`;
     }
-    stream.set(streamId, fieldValues);
+    stream.add(streamId, fieldValues);
     this.storage.write(db, "stream", key, stream);
     return streamId;
   });
 
   xlen: (db: number, key: string) => number = API.shape.xlen.implement(
     (db, key) => {
-      return this.storage.read(db, "stream", key)?.size || 0;
+      return this.storage.read(db, "stream", key)?.length || 0;
     }
   );
+
+  xrange: (
+    db: number,
+    key: string,
+    start: string,
+    end?: string,
+    count?: number
+  ) => RawStream = (db, key, start, end?, count?) =>
+    API.shape.xrange.implement((db, key, start, end, count) => {
+      const stream = this.storage.read(db, "stream", key);
+      if (stream === null) {
+        return [];
+      }
+      return stream.range(start, end, count);
+    })(db, key, start, end ?? "+", count ?? Infinity);
+
+  type: (db: number, key: string) => "string" | "set" | "stream" | "none" =
+    API.shape.type.implement((db, key) => {
+      for (const type of TYPE_NAMES) {
+        try {
+          if (this.storage.read(db, type, key) !== null) {
+            return type;
+          }
+        } catch {
+          // That's fine, try something else
+        }
+      }
+      return "none";
+    });
 }
