@@ -153,8 +153,8 @@ export abstract class BaseService {
       buffer.push(...this.listenPort.drain());
 
       const raw = await this.nextRequest(buffer);
-      this.log.debug("req", { request: raw });
       if (raw !== null) {
+        this.log.debug("req", { request: raw });
         await this.handleRequest(raw);
       }
 

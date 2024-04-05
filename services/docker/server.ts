@@ -13,15 +13,18 @@ import {
   SwarmCapacityEntry,
   Task,
 } from "./types";
+import { TimerManager } from "lib/TimerManager";
 
 const REDIS_KEYS = {
   NODES: "docker:swarm:nodes",
   SERVICES: "docker:services",
   SERVICE: (id: string) => `docker:service:${id}`,
-  SERVICE_BY_NAME: (name: string) => `docker:service/name:${name}`,
+  SERVICE_BY_NAME: (name: string) => `docker:servicebyname:${name}`,
   TASK: (serviceId: string, taskId: string) =>
     `docker:service:${serviceId}:task:${taskId}`,
 };
+
+const ID_BYTES = 8;
 
 export class DockerService extends BaseService implements API {
   private readonly redis: RedisClient;
@@ -38,6 +41,127 @@ export class DockerService extends BaseService implements API {
   override async setup() {
     await this.redis.sadd(REDIS_KEYS.NODES, [this.ns.getHostname()]);
   }
+
+  protected override registerTimers(timers: TimerManager) {
+    timers.setInterval(() => this.keepalive(), 1000);
+  }
+
+  keepalive = async () => {
+    const services = await this.serviceLs();
+    const deadTasks = [];
+
+    for (const service of services) {
+      const tasks = await this.servicePs(service.id);
+
+      for (const task of tasks) {
+        if (!this.ns.getRunningScript(task.pid)) {
+          this.log.twarn("task", {
+            service: service.name,
+            task: task.name || task.id,
+            result: "crashed",
+          });
+          service.state.threads -= task.threads;
+          service.state.tasks.splice(service.state.tasks.indexOf(task.id), 1);
+          deadTasks.push(task.id);
+        }
+      }
+
+      if (deadTasks.length > 0) {
+        await this.redis.set(
+          REDIS_KEYS.SERVICE(service.id),
+          JSON.stringify(service)
+        );
+        await this.redis.del(deadTasks as [string, ...string[]]);
+        await this.ensureTasks(service);
+      }
+    }
+  };
+
+  ensureTasks = async (service: Service) => {
+    const name = service.name;
+    const script = service.spec.script;
+    const scriptRam = this.ns.getScriptRam(service.spec.script);
+    const capacity = await this.swarmCapacity();
+    const threads = service.spec.threads;
+    const hostname = service.spec.hostname;
+
+    this.log.debug("ensureTasks", {
+      name,
+      script,
+      scriptRam,
+      threads,
+      hostname,
+    });
+
+    const hostCandidates = calculateHostCandidates(
+      scriptRam,
+      threads,
+      capacity,
+      hostname
+    );
+    this.log.debug("ensureTasks", { name, hostCandidates });
+
+    const allocations = allocateThreads(
+      scriptRam,
+      threads,
+      capacity,
+      hostCandidates
+    );
+    this.log.debug("ensureTasks", { name, allocations });
+
+    const allocated = Object.values(allocations).reduce(
+      (sum, threads) => sum + threads,
+      0
+    );
+    if (allocated !== threads) {
+      throw new Error(
+        `failed to allocate all threads. wanted=${threads.toString()} got=${allocated.toString()}`
+      );
+    }
+
+    const tasks: Task[] = [];
+    for (const [host, threads] of Object.entries(allocations)) {
+      if (!this.ns.scp(script, host)) {
+        throw new Error(`failed to scp ${script} to host=${host}`);
+      }
+      await this.ns.sleep(0);
+      let taskId = generateId(ID_BYTES);
+      while (await this.redis.exists([REDIS_KEYS.TASK(service.id, taskId)])) {
+        taskId = generateId(ID_BYTES);
+      }
+      const execArgs: [string, string, number, ...string[]] = [
+        script,
+        host,
+        threads,
+        ...service.spec.args,
+      ];
+      const pid = this.ns.exec(...execArgs);
+      if (pid === 0) {
+        throw new Error(
+          `failed to start task execArgs=${JSON.stringify(execArgs)}`
+        );
+      }
+      tasks.push({
+        id: taskId,
+        name: `${name}.${(tasks.length + 1).toString()}`,
+        host,
+        pid,
+        threads,
+        ram: scriptRam * threads,
+      });
+      service.state.threads += threads;
+    }
+
+    service.state.tasks = tasks.map((t) => t.id);
+
+    await this.redis.mset({
+      [REDIS_KEYS.SERVICE(service.id)]: JSON.stringify(service),
+      [REDIS_KEYS.SERVICE_BY_NAME(name)]: service.id,
+      ...Object.fromEntries(
+        tasks.map((t) => [REDIS_KEYS.TASK(service.id, t.id), JSON.stringify(t)])
+      ),
+    });
+  };
 
   swarmCapacity: () => Promise<SwarmCapacity> =
     API.shape.swarmCapacity.implement(async () => {
@@ -93,108 +217,38 @@ export class DockerService extends BaseService implements API {
       if (!this.ns.fileExists(script)) {
         throw new Error(`script not found: ${script}`);
       }
-      const scriptRam = this.ns.getScriptRam(script);
-      const capacity = await this.swarmCapacity();
-      const threads = spec.threads;
-      const hostname = spec.hostname;
-
-      this.log.debug("service-create", {
-        name,
-        script,
-        scriptRam,
-        threads,
-        hostname,
-      });
-
-      const hostCandidates = calculateHostCandidates(
-        scriptRam,
-        threads,
-        capacity,
-        hostname
-      );
-      this.log.debug("service-create", { name, hostCandidates });
-
-      const allocations = allocateThreads(
-        scriptRam,
-        threads,
-        capacity,
-        hostCandidates
-      );
-      this.log.debug("service-create", { name, allocations });
-
-      const allocated = Object.values(allocations).reduce(
-        (sum, threads) => sum + threads,
-        0
-      );
-      if (allocated !== threads) {
-        throw new Error(
-          `failed to allocate all threads. wanted=${threads.toString()} got=${allocated.toString()}`
-        );
+      if (await this.redis.exists([REDIS_KEYS.SERVICE_BY_NAME(name)])) {
+        throw new Error(`service already exists: ${name}`);
       }
 
-      const tasks: Task[] = [];
-      try {
-        for (const [host, threads] of Object.entries(allocations)) {
-          if (!this.ns.scp(script, host)) {
-            throw new Error(`failed to scp ${script} to host=${host}`);
-          }
-          await this.ns.sleep(0);
-          const taskId = generateId(8);
-          const execArgs: [string, string, number, ...string[]] = [
-            script,
-            host,
-            threads,
-            ...spec.args,
-          ];
-          const pid = this.ns.exec(...execArgs);
-          if (pid === 0) {
-            throw new Error(
-              `failed to start task execArgs=${JSON.stringify(execArgs)}`
-            );
-          }
-          tasks.push({
-            id: taskId,
-            name: `${name}.${(tasks.length + 1).toString()}`,
-            host,
-            pid,
-            threads,
-            ram: scriptRam * threads,
-          });
-        }
+      let serviceId = generateId(ID_BYTES);
+      while (await this.redis.exists([REDIS_KEYS.SERVICE(serviceId)])) {
+        serviceId = generateId(ID_BYTES);
+      }
 
-        const serviceId = generateId(8);
+      try {
         const service: Service = {
           id: serviceId,
           name,
           spec,
           state: {
-            tasks: tasks.map((t) => t.id),
-            threads,
+            tasks: [],
+            threads: 0,
           },
         };
-
         await this.redis.sadd(REDIS_KEYS.SERVICES, [serviceId]);
-        await this.redis.mset({
-          [REDIS_KEYS.SERVICE(serviceId)]: JSON.stringify(service),
-          [REDIS_KEYS.SERVICE_BY_NAME(name)]: serviceId,
-          ...Object.fromEntries(
-            tasks.map((t) => [
-              REDIS_KEYS.TASK(serviceId, t.id),
-              JSON.stringify(t),
-            ])
-          ),
-        });
-
+        await this.redis.set(
+          REDIS_KEYS.SERVICE(serviceId),
+          JSON.stringify(service)
+        );
+        await this.ensureTasks(service);
         return serviceId;
       } catch (error) {
         this.log.terror("service-create", {
           name,
           error: maybeZodErrorMessage(error),
         });
-        for (const task of tasks) {
-          this.ns.kill(task.pid);
-        }
-        // TODO clean up redis
+        await this.serviceRm(serviceId);
         throw error;
       }
     }

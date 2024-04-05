@@ -90,7 +90,7 @@ export class DirectRedisStorage implements IRedisStorage {
   del(db: number, keys: string[]): number {
     let removed = 0;
     for (const key of keys) {
-      if (!this.exists(db, key)) {
+      if (this.exists(db, key)) {
         this.ns.rm(this.path(db, key));
         removed++;
       }
