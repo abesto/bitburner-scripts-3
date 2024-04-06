@@ -1,0 +1,27 @@
+diff --git a/browser.d.ts b/browser.d.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..e41056092dd3fb72394bc5c7dd38570d2f2b67c5
+--- /dev/null
++++ b/browser.d.ts
+@@ -0,0 +1,5 @@
++import { Argv } from ".";
++
++declare function Yargs(processArgs?: readonly string[] | string): Argv;
++
++export = Yargs;
+diff --git a/package.json b/package.json
+index 45c295f2e3d6ba2125b5dc1b43938578579211a4..9b31cc784d81b36e0ac93b52898ee3f468901a63 100644
+--- a/package.json
++++ b/package.json
+@@ -71,6 +71,11 @@
+                 "default": "./yargs.d.ts"
+             }
+         },
++        "./browser": {
++            "types": {
++                "default": "./browser.d.ts"
++            }
++        },
+         "./package.json": "./package.json"
+     },
+     "repository": {

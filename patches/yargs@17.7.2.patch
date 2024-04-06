@@ -1,0 +1,29 @@
+diff --git a/browser.d.ts b/browser.d.ts
+deleted file mode 100644
+index 21f3fc69190b574ab8456514d3da1972afa53973..0000000000000000000000000000000000000000
+diff --git a/lib/platform-shims/browser.mjs b/lib/platform-shims/browser.mjs
+index 5f8ec61f449a10d0281268b409cf026da6468333..a0b476cdbab9e32005ff07c12f0e162e6f5af09d 100644
+--- a/lib/platform-shims/browser.mjs
++++ b/lib/platform-shims/browser.mjs
+@@ -1,8 +1,8 @@
+ /* eslint-disable no-unused-vars */
+ 'use strict';
+ 
+-import cliui from 'https://unpkg.com/cliui@7.0.1/index.mjs'; // eslint-disable-line
+-import Parser from 'https://unpkg.com/yargs-parser@19.0.0/browser.js'; // eslint-disable-line
++import cliui from 'cliui'
++import Parser from 'yargs-parser/browser'
+ import {getProcessArgvBin} from '../../build/lib/utils/process-argv.js';
+ import {YError} from '../../build/lib/yerror.js';
+ 
+@@ -46,8 +46,9 @@ export default {
+     // exit is noop browser:
+     exit: () => {},
+     nextTick: cb => {
++      // eval("window"): avoid Bitburner RAM cost
+       // eslint-disable-next-line no-undef
+-      window.setTimeout(cb, 1);
++      eval("window").setTimeout(cb, 1);
+     },
+     stdColumns: 80,
+   },
