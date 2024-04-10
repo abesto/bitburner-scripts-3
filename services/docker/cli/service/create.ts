@@ -1,5 +1,4 @@
 import { CliContext } from "lib/cli";
-import { maybeZodErrorMessage } from "lib/error";
 import { dockerClient } from "services/docker/client";
 import { ServiceSpec } from "services/docker/types";
 import { ArgumentsCamelCase, Argv } from "yargs";
@@ -95,10 +94,6 @@ export const handler = async (
     },
   };
 
-  try {
-    const id = await docker.serviceCreate(serviceSpec);
-    log.tinfo(id);
-  } catch (e) {
-    log.terror(maybeZodErrorMessage(e));
-  }
+  const id = await docker.serviceCreate(serviceSpec);
+  log.tinfo(id);
 };

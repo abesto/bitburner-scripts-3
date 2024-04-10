@@ -4,6 +4,7 @@ import * as ps from "./ps";
 import * as create from "./create";
 import * as rm from "./rm";
 import * as inspect from "./inspect";
+import * as scale from "./scale";
 import { CliContext } from "lib/cli";
 
 export const command = "service";
@@ -16,6 +17,7 @@ export const builder = (yargs: Argv<CliContext>) =>
     .command(inspect)
     .command(ps)
     .command(rm)
+    .command(scale)
     .demandCommand();
 
 // eslint-disable-next-line @typescript-eslint/no-empty-function

@@ -10,6 +10,7 @@ import {
   Service,
   ServiceMode,
   ServiceName,
+  ServiceSpec,
   ServiceStatus,
   SwarmCapacity,
   SwarmCapacityEntry,
@@ -464,4 +465,33 @@ export class DockerService extends BaseService implements API {
         serviceIds.map((id) => this.lookupTasks(id))
       ).then((tasks) => tasks.flat());
     });
+
+  serviceUpdate: (
+    idOrName: string,
+    version: number,
+    newSpec: ServiceSpec
+  ) => Promise<void> = API.shape.serviceUpdate.implement(
+    async (idOrName, version, newSpec) => {
+      const service = await this.lookupService(idOrName);
+      if (service === null) {
+        throw new Error(`service not found: ${idOrName}`);
+      }
+      if (service.version !== version) {
+        throw new Error(
+          `service version mismatch: expected ${service.version.toString()} got ${version.toString()}`
+        );
+      }
+
+      // We could be much smarter about this probably, but... good enough?
+      service.spec = newSpec;
+      service.version += 1;
+      await this.redis.set(
+        REDIS_KEYS.SERVICE(service.id),
+        JSON.stringify(service)
+      );
+
+      await this.scaleDown(service);
+      await this.scaleUp(service);
+    }
+  );
 }

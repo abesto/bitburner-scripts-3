@@ -3,6 +3,7 @@ import yargs from "yargs/browser";
 import { Fmt } from "./fmt";
 import { Log } from "./log";
 import { z } from "zod";
+import { maybeZodErrorMessage } from "./error";
 
 export interface CliContext {
   ns: NS;
@@ -33,18 +34,22 @@ export const cliMain =
 
     const ctx = cliContext(ns, mod.name);
 
-    return await (yargs() as Argv<CliContext>)
-      .usage(`Usage: $0 <command> [options]\n\n${mod.describe}`)
-      .scriptName(mod.name)
-      .command(mod.commands)
-      .strict()
-      .demandCommand()
-      .wrap(120)
-      .parse(rawArgs, cliContext(ns, mod.name), (err, argv, output) => {
-        if (err && output.length > 0) {
-          ctx.log.terror(output);
-        } else if (output.length > 0) {
-          ctx.log.tinfo(output);
-        }
-      });
+    try {
+      return await (yargs() as Argv<CliContext>)
+        .usage(`Usage: $0 <command> [options]\n\n${mod.describe}`)
+        .scriptName(mod.name)
+        .command(mod.commands)
+        .strict()
+        .demandCommand()
+        .wrap(120)
+        .parse(rawArgs, cliContext(ns, mod.name), (err, argv, output) => {
+          if (err && output.length > 0) {
+            ctx.log.terror(output);
+          } else if (output.length > 0) {
+            ctx.log.tinfo(output);
+          }
+        });
+    } catch (e) {
+      ctx.log.terror(maybeZodErrorMessage(e));
+    }
   };

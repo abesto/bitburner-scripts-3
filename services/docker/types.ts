@@ -161,6 +161,11 @@ export const API = z.object({
 
   serviceDelete: z.function().args(ServiceID).returns(z.void().promise()),
 
+  serviceUpdate: z
+    .function()
+    .args(ServiceID, z.number().describe("version"), ServiceSpec)
+    .returns(z.void().promise()),
+
   taskList: z.function().args(TaskListQuery).returns(Task.array().promise()),
 });
 export type API = z.infer<typeof API>;
