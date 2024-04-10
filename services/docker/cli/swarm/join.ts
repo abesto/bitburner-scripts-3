@@ -7,11 +7,8 @@ export const describe = "Join swarm as a node";
 
 export const handler = async ({
   ns,
-  log,
   server,
 }: ArgumentsCamelCase<CliContext & { server: string }>) => {
   const docker = dockerClient(ns);
-  log.tinfo("swarm-join", {
-    success: await docker.swarmJoin(server),
-  });
+  await docker.swarmJoin(server);
 };

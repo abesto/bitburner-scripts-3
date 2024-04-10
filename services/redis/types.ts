@@ -121,5 +121,7 @@ export const API = z.object({
         z.literal("hash"),
       ])
     ),
+
+  flushdb: z.function().args(db).returns(z.literal("OK")),
 });
 export type API = z.infer<typeof API>;

@@ -10,7 +10,9 @@ interface PsOptions {
   service: string;
 }
 
-export const builder = (yargs: Argv<CliContext>) =>
+export const builder = (
+  yargs: Argv<CliContext>
+): Argv<CliContext & PsOptions> =>
   yargs.positional("service", {
     type: "string",
     describe: "Service name",
@@ -24,7 +26,7 @@ export const handler = async ({
   service,
 }: ArgumentsCamelCase<CliContext & PsOptions>) => {
   const docker = dockerClient(ns);
-  const tasks = await docker.servicePs(service);
+  const tasks = await docker.taskList({ filters: { service: [service] } });
   log.tinfo(
     "\n" +
       fmt
@@ -35,7 +37,7 @@ export const handler = async ({
             task.name,
             task.threads.toString(),
             task.pid.toString(),
-            task.host,
+            task.hostname,
             fmt.memory(task.ram),
           ])
         )

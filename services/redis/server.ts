@@ -202,4 +202,11 @@ export class RedisService extends BaseService implements API {
       }
       return "none";
     });
+
+  flushdb: (db: number) => "OK" = API.shape.flushdb.implement((db) => {
+    for (const key of this.storage.keys(db)) {
+      this.storage.del(db, [key]);
+    }
+    return "OK";
+  });
 }

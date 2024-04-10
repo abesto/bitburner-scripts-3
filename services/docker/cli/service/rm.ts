@@ -20,9 +20,8 @@ export const builder = (yargs: Argv<CliContext>) =>
 
 export const handler = async ({
   ns,
-  log,
   service,
 }: ArgumentsCamelCase<CliContext & RmOptions>) => {
   const docker = dockerClient(ns);
-  log.tinfo(await docker.serviceRm(service));
+  await docker.serviceDelete(service);
 };

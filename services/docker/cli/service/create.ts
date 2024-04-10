@@ -1,30 +1,29 @@
 import { CliContext } from "lib/cli";
+import { maybeZodErrorMessage } from "lib/error";
 import { dockerClient } from "services/docker/client";
 import { ServiceSpec } from "services/docker/types";
 import { ArgumentsCamelCase, Argv } from "yargs";
 
-export const command = "create <name> <script> [args..]";
+export const command = "create <script> [args..]";
 export const describe = "Create a new service";
 
 interface CreateOptions {
-  name: string;
   script: string;
   args: string[];
+  name: string;
   threads: number;
   ["restart-condition"]: string;
+  constraint: string[];
 }
 
-export const builder = (argv: Argv<CliContext>) =>
+export const builder = (
+  argv: Argv<CliContext>
+): Argv<CliContext & CreateOptions> =>
   argv
     .positional("script", {
       type: "string",
       demandOption: true,
       describe: "Script to execute; must exist on the Docker daemon host",
-    })
-    .positional("name", {
-      type: "string",
-      demandOption: true,
-      describe: "Name of the service",
     })
     .positional("args", {
       type: "string",
@@ -33,6 +32,11 @@ export const builder = (argv: Argv<CliContext>) =>
       describe: "Arguments to pass to the script",
     })
     .options({
+      name: {
+        type: "string",
+        demandOption: true,
+        describe: "Name of the service",
+      },
       threads: {
         type: "number",
         default: 1,
@@ -40,32 +44,61 @@ export const builder = (argv: Argv<CliContext>) =>
       },
       "restart-condition": {
         type: "string",
-        choices: ["any", "on-failure", "never"],
+        choices: ["any", "on-failure", "none"],
         default: "any",
         describe: "Restart condition",
       },
-      hostname: {
+      constraint: {
         type: "string",
-        describe: "Hostname to run the service on",
+        array: true,
+        default: [],
       },
     });
 
 export const handler = async (
   argv: ArgumentsCamelCase<CliContext & CreateOptions>
 ) => {
-  const { ns, log, name, script, args, threads, restartCondition, hostname } =
-    argv;
+  const {
+    ns,
+    log,
+    name,
+    script,
+    args,
+    threads,
+    restartCondition,
+    constraint: constraints,
+  } = argv;
 
   const docker = dockerClient(ns);
 
-  const serviceSpec = ServiceSpec.parse({
-    script,
-    hostname,
-    threads,
-    restartCondition,
-    args,
-  });
+  const serviceSpec: ServiceSpec = {
+    name,
+    labels: {},
+    taskTemplate: {
+      containerSpec: {
+        labels: {},
+        command: script,
+        args,
+      },
+      restartPolicy: {
+        condition: restartCondition as "none" | "on-failure" | "any",
+        delay: 0,
+        maxAttempts: 0,
+      },
+      placement: {
+        constraints,
+      },
+    },
+    mode: {
+      type: "replicated",
+      replicas: threads,
+    },
+  };
 
-  const id = await docker.serviceCreate(name, serviceSpec);
-  log.tinfo(id);
+  try {
+    const id = await docker.serviceCreate(serviceSpec);
+    log.tinfo(id);
+  } catch (e) {
+    log.terror(maybeZodErrorMessage(e));
+  }
 };

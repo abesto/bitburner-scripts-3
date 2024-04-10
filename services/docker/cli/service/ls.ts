@@ -12,19 +12,18 @@ export const handler = async ({
   fmt,
 }: ArgumentsCamelCase<CliContext>) => {
   const docker = dockerClient(ns);
-  const services = await docker.serviceLs();
+  const services = await docker.serviceList();
   log.tinfo(
     "\n" +
       fmt
         .table(
-          ["ID", "NAME", "THREADS", "SCRIPT", "RESTART", "HOST"],
+          ["ID", "NAME", "THREADS", "SCRIPT", "RESTART"],
           ...services.map((service) => [
             service.id,
-            service.name,
-            `${service.state.threads.toString()}/${service.spec.threads.toString()}`,
-            service.spec.script,
-            service.spec.restartCondition,
-            service.spec.hostname || "(any)",
+            service.spec.name,
+            `${service.serviceStatus.runningThreads.toString()}/${service.serviceStatus.desiredThreads.toString()}`,
+            service.spec.taskTemplate.containerSpec.command,
+            service.spec.taskTemplate.restartPolicy.condition,
           ])
         )
         .join("\n")

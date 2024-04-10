@@ -1,7 +1,7 @@
 import { Log } from "lib/log";
 import { ServerPort } from "./transport/ServerPort";
 import { Request, Response, errorResponse, successResponse } from "./types";
-import { Fmt } from "lib/fmt";
+import { Fmt, highlightJSON } from "lib/fmt";
 import { TimerManager } from "lib/TimerManager";
 import { ClientPort } from "./transport/ClientPort";
 import { fromZodError } from "zod-validation-error";
@@ -116,6 +116,9 @@ export abstract class BaseService {
     const f = method as (...args: unknown[]) => unknown;
     if (request.responseMeta === undefined) {
       await this.executeWithoutResponse(request.method, f, request.args);
+      this.log.debug(
+        `${request.method}(${request.args.map(highlightJSON).join(", ")})`
+      );
     } else {
       const response = await this.executeWithResponse(
         request.method,
@@ -123,7 +126,14 @@ export abstract class BaseService {
         request.args,
         request.responseMeta.msgId
       );
-      this.log.debug("res", { request, response });
+      //this.log.debug("res", { request, response });
+      this.log.debug(
+        `${request.method}(${request.args
+          .map(highlightJSON)
+          .join(", ")}) => ${highlightJSON(
+          response.status === "success" ? response.result : response.error
+        )} (client: ${request.responseMeta.port.toString()})`
+      );
       await this.respond(request.responseMeta.port, response);
     }
   };
@@ -154,7 +164,7 @@ export abstract class BaseService {
 
       const raw = await this.nextRequest(buffer);
       if (raw !== null) {
-        this.log.debug("req", { request: raw });
+        //this.log.debug("req", { request: raw });
         await this.handleRequest(raw);
       }
 

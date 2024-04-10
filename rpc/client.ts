@@ -3,6 +3,7 @@ import { ClientPort } from "./transport/ClientPort";
 import { ServerPort } from "./transport/ServerPort";
 import { Response, RpcError } from "./types";
 import { fromZodError } from "zod-validation-error";
+import { highlightJSON } from "lib/fmt";
 
 // Heavily inspired by https://github.com/fgnass/typed-rpc/blob/main/src/client.ts
 
@@ -45,7 +46,7 @@ export const rpcClient = <T extends object>(ns: NS, portNumber: number) => {
         return async (...args: unknown[]) => {
           const request = buildRequest(method, args);
           await port.write(request);
-          log.debug("req", { request });
+          //log.debug("req", { request });
 
           const raw = await responsePort.read();
           const maybeResponse = Response.safeParse(raw);
@@ -54,7 +55,16 @@ export const rpcClient = <T extends object>(ns: NS, portNumber: number) => {
             log.error(error.message, { request });
             throw error;
           }
-          log.debug("res", { request, response: maybeResponse.data });
+          //log.debug("res", { request, response: maybeResponse.data });
+          log.debug(
+            `${method}(${args
+              .map(highlightJSON)
+              .join(", ")}) => ${highlightJSON(
+              maybeResponse.data.status === "success"
+                ? maybeResponse.data.result
+                : maybeResponse.data.error
+            )}`
+          );
 
           const data = maybeResponse.data;
           if (data.status === "error") {

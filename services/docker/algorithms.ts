@@ -5,7 +5,7 @@ export function calculateHostCandidates(
   scriptRam: number,
   threads: number,
   swarmCapacity: SwarmCapacity,
-  hostname: string | undefined
+  hostnames: string[]
 ): string[] {
   let capacity: [string, number][] = Object.entries(swarmCapacity.hosts).map(
     ([host, { used, max }]) => [host, max - used]
@@ -27,8 +27,8 @@ export function calculateHostCandidates(
     return freeA - freeB;
   });
   // Apply host affinity
-  if (hostname) {
-    capacity = capacity.filter(([host]) => host === hostname);
+  if (hostnames.length > 0) {
+    capacity = capacity.filter(([host]) => hostnames.includes(host));
   }
   return capacity.map(([host]) => host);
 }

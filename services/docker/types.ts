@@ -5,66 +5,162 @@ export const SwarmCapacityEntry = z.object({
   max: z.number(),
 });
 export type SwarmCapacityEntry = z.infer<typeof SwarmCapacityEntry>;
-
 export const SwarmCapacity = z.object({
   total: SwarmCapacityEntry,
   hosts: z.record(SwarmCapacityEntry),
 });
 export type SwarmCapacity = z.infer<typeof SwarmCapacity>;
 
-export const ServiceSpec = z.object({
-  script: z.string().describe("path to the script"),
-  hostname: z.string().optional().describe("start service on this host"),
-  args: z.string().array().default([]).describe("arguments to the service"),
-  threads: z.number().describe("number of threads to start").default(1),
-  restartCondition: z.enum(["none", "on-failure", "any"]).default("any"),
-});
-export type ServiceSpec = z.infer<typeof ServiceSpec>;
+export const Labels = z.record(z.string());
+export type Labels = z.infer<typeof Labels>;
 
-export const ServiceState = z.object({
-  tasks: z.string().array(),
-  threads: z.number(),
-});
-export type ServiceState = z.infer<typeof ServiceState>;
+export const ServiceID = z.string();
+export type ServiceID = z.infer<typeof ServiceID>;
 
-export const Service = z.object({
-  id: z.string(),
-  name: z.string(),
-  spec: ServiceSpec,
-  state: ServiceState,
+export const ServiceName = z.string();
+export type ServiceName = z.infer<typeof ServiceName>;
+
+export const Version = z.number();
+export type Version = z.infer<typeof Version>;
+
+export const PlacementConstraint = z
+  .string()
+  .transform((s) => s.split("="))
+  .pipe(z.tuple([z.enum(["node.hostname"]), z.string()]));
+export type PlacementConstraint = z.infer<typeof PlacementConstraint>;
+
+export const TaskSpec = z.object({
+  containerSpec: z.object({
+    labels: Labels,
+    command: z.string(),
+    args: z.string().array(),
+  }),
+  restartPolicy: z.object({
+    condition: z.enum(["none", "on-failure", "any"]),
+    delay: z.number(),
+    maxAttempts: z.number(),
+  }),
+  placement: z.object({
+    constraints: z
+      .string()
+      .refine((s) => PlacementConstraint.parse(s), {
+        message: "Invalid placement constraint",
+      })
+      .array(),
+  }),
 });
-export type Service = z.infer<typeof Service>;
+export type TaskSpec = z.infer<typeof TaskSpec>;
+
+export const TaskID = z.string();
+export type TaskID = z.infer<typeof TaskID>;
+
+export const TaskName = z.string();
+export type TaskName = z.infer<typeof TaskName>;
 
 export const Task = z.object({
-  id: z.string(),
-  name: z.string(),
-  host: z.string(),
-  pid: z.number(),
+  id: TaskID,
+  version: Version,
+  name: TaskName,
+  labels: Labels,
+  spec: TaskSpec,
+  serviceId: ServiceID,
+  hostname: z.string(), // instead of `NodeID` in real Docker
+  status: z.object({
+    timestamp: z.string().datetime(),
+    status: z.enum(["running", "complete", "shutdown", "failed"]),
+  }),
+  // Bitburner specific fields
   threads: z.number(),
+  pid: z.number(),
   ram: z.number(),
 });
 export type Task = z.infer<typeof Task>;
+
+export const ServiceMode = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("replicated"),
+    replicas: z.number(),
+  }),
+  z.object({
+    type: z.literal("replicated-job"),
+    maxConcurrent: z.number(),
+    totalCompletions: z
+      .number()
+      .optional()
+      .describe(
+        "The total number of replicas desired to reach the Completed state. If unset, will default to the value of maxConcurrent"
+      ),
+  }),
+]);
+export type ServiceMode = z.infer<typeof ServiceMode>;
+
+export const ServiceSpec = z.object({
+  name: ServiceName,
+  labels: Labels,
+  taskTemplate: TaskSpec,
+  mode: ServiceMode,
+});
+export type ServiceSpec = z.infer<typeof ServiceSpec>;
+
+export const Service = z.object({
+  id: ServiceID,
+  version: Version,
+  spec: ServiceSpec,
+});
+export type Service = z.infer<typeof Service>;
+
+export const ServiceStatus = z.object({
+  runningThreads: z.number(),
+  desiredThreads: z.number(),
+  completedThreads: z.number(),
+});
+export type ServiceStatus = z.infer<typeof ServiceStatus>;
+
+export const TaskListQuery = z.object({
+  filters: z.object({
+    service: z.string().array().optional(),
+  }),
+});
+export type TaskListQuery = z.infer<typeof TaskListQuery>;
 
 export const API = z.object({
   swarmCapacity: z.function().returns(SwarmCapacity.promise()),
   swarmJoin: z
     .function()
     .args(z.string().describe("hostname"))
-    .returns(z.boolean().promise().describe("success")),
+    .returns(z.void().promise()),
 
   serviceCreate: z
     .function()
-    .args(z.string().describe("name"), ServiceSpec)
+    .args(
+      z.object({
+        name: ServiceName,
+        labels: Labels,
+        taskTemplate: TaskSpec,
+        mode: ServiceMode,
+      })
+    )
     .returns(z.string().promise().describe("created service id")),
 
-  serviceLs: z.function().returns(Service.array().promise()),
-  servicePs: z
+  // The real API takes a boolean that controls whether `ServiceStatus` is included.
+  // That makes typing tricky, and the optimization doesn't really matter for us,
+  // so always include it.
+  serviceList: z
     .function()
-    .args(z.string().describe("service id or name"))
-    .returns(Task.array().promise()),
-  serviceRm: z
+    .args
+    // TODO this is where filters would live
+    ()
+    .returns(
+      Service.extend({ serviceStatus: ServiceStatus }).array().promise()
+    ),
+
+  serviceInspect: z
     .function()
-    .args(z.string().describe("service id or name"))
-    .returns(z.string().promise()),
+    .args(z.string().describe("ID or service name"))
+    .returns(Service.extend({ serviceStatus: ServiceStatus }).promise()),
+
+  serviceDelete: z.function().args(ServiceID).returns(z.void().promise()),
+
+  taskList: z.function().args(TaskListQuery).returns(Task.array().promise()),
 });
 export type API = z.infer<typeof API>;
