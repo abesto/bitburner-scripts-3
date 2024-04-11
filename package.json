@@ -24,8 +24,8 @@
     "@typescript-eslint/eslint-plugin": "^7.6.0",
     "@typescript-eslint/parser": "^7.6.0",
     "esbuild-plugin-eslint": "^0.3.12",
-    "eslint": "^9.0.0",
-    "eslint-plugin-vitest": "^0.5.1",
+    "eslint": "^8.57.0",
+    "eslint-plugin-vitest": "^0.4.1",
     "typescript": "^5.4.5",
     "typescript-eslint": "^7.6.0",
     "vitest": "^1.4.0"
