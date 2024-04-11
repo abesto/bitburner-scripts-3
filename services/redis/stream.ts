@@ -61,8 +61,15 @@ export class Stream {
     return this.data.slice(startIndex, endIndex);
   }
 
-  trim(maxLength: number) {
+  trimMaxLength(maxLength: number) {
     this.data.splice(0, this.data.length - maxLength);
+  }
+
+  trimMinId(minId: StreamID) {
+    const index = this.indexOfLastEarlierThan(minId);
+    if (index !== -1) {
+      this.data.splice(0, index + 1);
+    }
   }
 
   prefix(prefix: string): [StreamID, StreamEntry][] {

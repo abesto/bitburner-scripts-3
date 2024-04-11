@@ -7,6 +7,7 @@ import {
   SetResult,
   StreamEntry,
   StreamID,
+  XaddThreshold,
 } from "./types";
 import { Minimatch } from "minimatch";
 import { CachedRedisStorage, IRedisStorage, TYPE_NAMES } from "./storage";
@@ -154,19 +155,28 @@ export class RedisService extends BaseService implements API {
     db: number,
     key: string,
     streamId: StreamID,
-    fieldValues: StreamEntry
-  ) => string = API.shape.xadd.implement((db, key, streamId, fieldValues) => {
-    const stream = this.storage.read(db, "stream", key) ?? new Stream();
+    fieldValues: StreamEntry,
+    threshold?: XaddThreshold
+  ) => string = (db, key, streamId, fieldValues, threshold) =>
+    API.shape.xadd.implement((db, key, streamId, fieldValues) => {
+      const stream = this.storage.read(db, "stream", key) ?? new Stream();
 
-    if (streamId === "*") {
-      const timestamp = Date.now().toString();
-      const existing = stream.prefix(timestamp);
-      streamId = `${timestamp}-${existing.length.toString()}`;
-    }
-    stream.add(streamId, fieldValues);
-    this.storage.write(db, "stream", key, stream);
-    return streamId;
-  });
+      if (streamId === "*") {
+        const timestamp = Date.now().toString();
+        const existing = stream.prefix(timestamp);
+        streamId = `${timestamp}-${existing.length.toString()}`;
+      }
+      stream.add(streamId, fieldValues);
+
+      if (threshold?.type === "maxlen") {
+        stream.trimMaxLength(threshold.count);
+      } else if (threshold?.type === "minid") {
+        stream.trimMinId(threshold.id);
+      }
+
+      this.storage.write(db, "stream", key, stream);
+      return streamId;
+    })(db, key, streamId, fieldValues, threshold);
 
   xlen: (db: number, key: string) => number = API.shape.xlen.implement(
     (db, key) => {
@@ -186,7 +196,24 @@ export class RedisService extends BaseService implements API {
       if (stream === null) {
         return [];
       }
-      return stream.range(start, end, count);
+
+      const startExclusive = start[0] === "(";
+      const endExclusive = end[0] === "(";
+      if (startExclusive) {
+        start = start.slice(1);
+      }
+      if (endExclusive) {
+        end = end.slice(1);
+      }
+
+      const entries = stream.range(start, end, count);
+      if (startExclusive && entries[0]?.[0] === start) {
+        entries.shift();
+      }
+      if (endExclusive && entries[entries.length - 1]?.[0] === end) {
+        entries.pop();
+      }
+      return entries;
     })(db, key, start, end ?? "+", count ?? Infinity);
 
   type: (db: number, key: string) => "string" | "set" | "stream" | "none" =

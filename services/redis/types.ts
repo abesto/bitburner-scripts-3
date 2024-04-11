@@ -29,6 +29,18 @@ export type StreamID = z.infer<typeof StreamID>;
 export const RawStream = z.tuple([StreamID, StreamEntry]).array();
 export type RawStream = z.infer<typeof RawStream>;
 
+export const XaddThreshold = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("maxlen"),
+    count: z.number(),
+  }),
+  z.object({
+    type: z.literal("minid"),
+    id: StreamID,
+  }),
+]);
+export type XaddThreshold = z.infer<typeof XaddThreshold>;
+
 export const streamSchema = z.custom<Stream>(
   (value) => value instanceof Stream,
   {
@@ -90,7 +102,8 @@ export const API = z.object({
       db,
       key,
       z.union([z.literal("*"), StreamID]).describe("stream id"),
-      StreamEntry
+      StreamEntry,
+      XaddThreshold.optional()
     )
     .returns(z.string()),
 
