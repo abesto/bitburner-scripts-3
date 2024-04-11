@@ -7,6 +7,8 @@ import {
   SetResult,
   StreamEntry,
   StreamID,
+  XReadRequest,
+  XReadResponse,
   XaddThreshold,
 } from "./types";
 import { Minimatch } from "minimatch";
@@ -236,4 +238,27 @@ export class RedisService extends BaseService implements API {
     }
     return "OK";
   });
+
+  xread: (db: number, request: XReadRequest) => XReadResponse =
+    API.shape.xread.implement((db, request) => {
+      const response: XReadResponse = {};
+      for (const [key, id] of request.streams) {
+        const stream = this.storage.read(db, "stream", key);
+        if (stream === null) {
+          response[key] = [];
+          continue;
+        }
+
+        if (id === "$") {
+          response[key] = [];
+          continue;
+        }
+        const entries = stream.range(id, "+", request.count);
+        if (entries[0]?.[0] === id) {
+          entries.shift();
+        }
+        response[key] = entries;
+      }
+      return response;
+    });
 }

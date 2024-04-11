@@ -51,6 +51,16 @@ export const streamSchema = z.custom<Stream>(
 const db = z.number().describe("db");
 const key = z.string().describe("key");
 
+export const XReadRequest = z.object({
+  count: z.number().optional(),
+  block: z.number().optional().describe("ms"),
+  streams: z.tuple([key, z.string()]).array().nonempty(),
+});
+export type XReadRequest = z.infer<typeof XReadRequest>;
+
+export const XReadResponse = z.record(key, RawStream);
+export type XReadResponse = z.infer<typeof XReadResponse>;
+
 export const API = z.object({
   get: z
     .function()
@@ -136,5 +146,7 @@ export const API = z.object({
     ),
 
   flushdb: z.function().args(db).returns(z.literal("OK")),
+
+  xread: z.function().args(db, XReadRequest).returns(XReadResponse),
 });
 export type API = z.infer<typeof API>;

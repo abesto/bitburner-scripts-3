@@ -84,12 +84,7 @@ export const ServiceMode = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("replicated-job"),
     maxConcurrent: z.number(),
-    totalCompletions: z
-      .number()
-      .optional()
-      .describe(
-        "The total number of replicas desired to reach the Completed state. If unset, will default to the value of maxConcurrent"
-      ),
+    totalCompletions: z.number(),
   }),
 ]);
 export type ServiceMode = z.infer<typeof ServiceMode>;
@@ -115,6 +110,11 @@ export const ServiceStatus = z.object({
   completedThreads: z.number(),
 });
 export type ServiceStatus = z.infer<typeof ServiceStatus>;
+
+export const ServiceWithStatus = Service.extend({
+  serviceStatus: ServiceStatus,
+});
+export type ServiceWithStatus = z.infer<typeof ServiceWithStatus>;
 
 export const TaskListQuery = z.object({
   filters: z.object({
@@ -150,14 +150,12 @@ export const API = z.object({
     .args
     // TODO this is where filters would live
     ()
-    .returns(
-      Service.extend({ serviceStatus: ServiceStatus }).array().promise()
-    ),
+    .returns(ServiceWithStatus.array().promise()),
 
   serviceInspect: z
     .function()
     .args(z.string().describe("ID or service name"))
-    .returns(Service.extend({ serviceStatus: ServiceStatus }).promise()),
+    .returns(ServiceWithStatus.promise()),
 
   serviceDelete: z.function().args(ServiceID).returns(z.void().promise()),
 

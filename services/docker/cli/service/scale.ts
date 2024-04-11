@@ -44,5 +44,5 @@ export const handler = async ({
   service.spec.mode.replicas = replicas;
   await docker.serviceUpdate(service.id, service.version, service.spec);
 
-  log.tinfo(`${serviceIdOrName} scaled to ${replicas}`);
+  log.tinfo(`${serviceIdOrName} scaled to ${replicas.toString()}`);
 };

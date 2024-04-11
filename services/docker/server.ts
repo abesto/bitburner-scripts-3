@@ -87,8 +87,10 @@ export class DockerService extends BaseService implements API {
   scaleDown = async (service: Service) => {
     const tasks = await this.lookupTasks(service.id);
 
-    const desiredThreads = this.desiredThreads(service.spec.mode);
-    const runningThreads = tasks.reduce((total, t) => total + t.threads, 0);
+    const { desiredThreads, runningThreads } = this.serviceStatus(
+      service,
+      tasks
+    );
     const threadsToKill = runningThreads - desiredThreads;
     if (threadsToKill <= 0) {
       return;
@@ -126,11 +128,11 @@ export class DockerService extends BaseService implements API {
 
   scaleUp = async (service: Service) => {
     const name = service.spec.name;
+    const oldTasks = await this.lookupTasks(service.id);
 
-    const desiredThreads = this.desiredThreads(service.spec.mode);
-    const runningThreads = (await this.lookupTasks(service.id)).reduce(
-      (total, t) => total + t.threads,
-      0
+    const { desiredThreads, runningThreads } = this.serviceStatus(
+      service,
+      oldTasks
     );
     const threads = desiredThreads - runningThreads;
     if (threads <= 0) {
@@ -321,14 +323,22 @@ export class DockerService extends BaseService implements API {
   );
 
   private serviceStatus = (service: Service, tasks: Task[]): ServiceStatus => {
+    const completedThreads = tasks
+      .filter((t) => t.status.status === "complete")
+      .reduce((total, t) => total + t.threads, 0);
+    const desiredThreads =
+      service.spec.mode.type === "replicated"
+        ? service.spec.mode.replicas
+        : Math.min(
+            service.spec.mode.maxConcurrent,
+            service.spec.mode.totalCompletions - completedThreads
+          );
     return {
       runningThreads: tasks
         .filter((t) => t.status.status === "running")
         .reduce((total, t) => total + t.threads, 0),
-      desiredThreads: this.desiredThreads(service.spec.mode),
-      completedThreads: tasks
-        .filter((t) => t.status.status === "complete")
-        .reduce((total, t) => total + t.threads, 0),
+      desiredThreads,
+      completedThreads,
     };
   };
 
@@ -404,12 +414,6 @@ export class DockerService extends BaseService implements API {
     return tasksRaw
       .filter((t) => t !== null)
       .map((t) => Task.parse(JSON.parse(t as string)));
-  }
-
-  private desiredThreads(mode: ServiceMode): number {
-    return mode.type === "replicated"
-      ? mode.replicas
-      : mode.totalCompletions ?? mode.maxConcurrent;
   }
 
   serviceDelete: (serviceIdOrName: string) => Promise<void> =

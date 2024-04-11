@@ -1,10 +1,19 @@
 import { CliContext } from "lib/cli";
 import { dockerClient } from "services/docker/client";
+import { ServiceWithStatus } from "services/docker/types";
 import { ArgumentsCamelCase } from "yargs";
 
 export const command = "ls";
 export const aliases = ["list"];
 export const describe = "List services";
+
+const threads = (service: ServiceWithStatus): string => {
+  let text = `${service.serviceStatus.runningThreads.toString()}/${service.serviceStatus.desiredThreads.toString()}`;
+  if (service.spec.mode.type === "replicated-job") {
+    text += ` (${service.serviceStatus.completedThreads.toString()}/${service.spec.mode.totalCompletions.toString()} completed)`;
+  }
+  return text;
+};
 
 export const handler = async ({
   ns,
@@ -13,6 +22,7 @@ export const handler = async ({
 }: ArgumentsCamelCase<CliContext>) => {
   const docker = dockerClient(ns);
   const services = await docker.serviceList();
+
   log.tinfo(
     "\n" +
       fmt
@@ -21,7 +31,7 @@ export const handler = async ({
           ...services.map((service) => [
             service.id,
             service.spec.name,
-            `${service.serviceStatus.runningThreads.toString()}/${service.serviceStatus.desiredThreads.toString()}`,
+            threads(service),
             service.spec.taskTemplate.containerSpec.command,
             service.spec.taskTemplate.restartPolicy.condition,
           ])

@@ -1,6 +1,6 @@
 import { CliContext } from "lib/cli";
 import { dockerClient } from "services/docker/client";
-import { ServiceSpec } from "services/docker/types";
+import { ServiceMode, ServiceSpec } from "services/docker/types";
 import { ArgumentsCamelCase, Argv } from "yargs";
 
 export const command = "create <script> [args..]";
@@ -10,9 +10,11 @@ interface CreateOptions {
   script: string;
   args: string[];
   name: string;
-  threads: number;
+  replicas: number;
+  ["max-concurrent"]?: number;
   ["restart-condition"]: string;
   constraint: string[];
+  mode: string;
 }
 
 export const builder = (
@@ -36,10 +38,14 @@ export const builder = (
         demandOption: true,
         describe: "Name of the service",
       },
-      threads: {
+      replicas: {
         type: "number",
         default: 1,
         describe: "[Bitburner] Number of threads to allocate for the service",
+      },
+      "max-concurrent": {
+        type: "number",
+        describe: "[Bitburner] Maximum number of threads to run concurrently",
       },
       "restart-condition": {
         type: "string",
@@ -52,6 +58,11 @@ export const builder = (
         array: true,
         default: [],
       },
+      mode: {
+        type: "string",
+        default: "replicated",
+        choices: ["replicated", "replicated-job"],
+      },
     });
 
 export const handler = async (
@@ -63,12 +74,23 @@ export const handler = async (
     name,
     script,
     args,
-    threads,
+    replicas,
+    maxConcurrent,
     restartCondition,
+    mode,
     constraint: constraints,
   } = argv;
 
   const docker = dockerClient(ns);
+
+  const modeSpec: ServiceMode =
+    mode === "replicated"
+      ? { type: "replicated", replicas: replicas }
+      : {
+          type: "replicated-job",
+          totalCompletions: replicas,
+          maxConcurrent: maxConcurrent ?? replicas,
+        };
 
   const serviceSpec: ServiceSpec = {
     name,
@@ -88,10 +110,7 @@ export const handler = async (
         constraints,
       },
     },
-    mode: {
-      type: "replicated",
-      replicas: threads,
-    },
+    mode: modeSpec,
   };
 
   const id = await docker.serviceCreate(serviceSpec);

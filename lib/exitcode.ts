@@ -1,4 +1,5 @@
 import { RedisClient, redisClient } from "services/redis/client";
+import { RawStream } from "services/redis/types";
 import { z } from "zod";
 
 export const ExitCodeEvent = z.object({
@@ -50,7 +51,8 @@ export class ExitCodeSubscriber {
   }
 
   async poll(): Promise<ExitCodeEvent[]> {
-    const stream = await this.redis.xrange(KEY, "(" + this.lastSeen, "+");
+    const streams = await this.redis.xread({ streams: [[KEY, this.lastSeen]] });
+    const stream: RawStream = streams[KEY] ?? [];
     if (stream.length === 0) {
       return [];
     }
