@@ -51,7 +51,8 @@ export class Log {
   }
 
   nameField(): string {
-    return "[" + this.name.padStart(10, " ") + "]";
+    const txt = `${this.name}:${this.ns.pid.toString()}`;
+    return `[${txt.padStart(10, " ")}]`;
   }
 
   format(
