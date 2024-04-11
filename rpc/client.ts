@@ -4,6 +4,7 @@ import { ServerPort } from "./transport/ServerPort";
 import { Response, RpcError } from "./types";
 import { fromZodError } from "zod-validation-error";
 import { highlightJSON } from "lib/fmt";
+import { generateId } from "lib/id";
 
 // Heavily inspired by https://github.com/fgnass/typed-rpc/blob/main/src/client.ts
 
@@ -25,15 +26,13 @@ export const rpcClient = <T extends object>(ns: NS, portNumber: number) => {
   const responsePortNumber = ns.pid + 1000;
   const responsePort = new ServerPort(ns, responsePortNumber);
 
-  let requestSequence = 0;
-
   const buildRequest = (method: string, args: unknown[]) => {
     return {
       marker: "rpc/Request",
       method,
       responseMeta: {
         port: responsePortNumber,
-        msgId: `${ns.pid.toString()}/${(requestSequence++).toString()}`,
+        msgId: `${ns.pid.toString()}/${generateId(8).toString()}`,
       },
       args,
     };
