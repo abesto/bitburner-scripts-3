@@ -1,15 +1,38 @@
+import { generateId } from "./id";
+
 interface Interval {
   lastRun: number;
   interval: number;
   callback: () => void | Promise<void>;
 }
 
+interface Timeout {
+  timeout: number;
+  callback: () => void | Promise<void>;
+}
+
 export class TimerManager {
-  private intervals: Interval[] = [];
+  private readonly intervals: Interval[] = [];
+  private readonly timeouts: Map<string, Timeout>;
+
+  constructor() {
+    this.timeouts = new Map();
+  }
 
   setInterval(callback: () => void | Promise<void>, ms: number): void {
     const syntheticLastRun = Math.floor(Date.now() / ms) * ms;
     this.intervals.push({ lastRun: syntheticLastRun, interval: ms, callback });
+  }
+
+  setTimeout(callback: () => void | Promise<void>, ms: number): () => void {
+    let id = generateId(16);
+    while (this.timeouts.has(id)) {
+      id = generateId(16);
+    }
+    this.timeouts.set(id, { timeout: Date.now() + ms, callback });
+    return () => {
+      this.timeouts.delete(id);
+    };
   }
 
   getTimeUntilNextEvent(): number {

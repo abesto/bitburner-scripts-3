@@ -13,7 +13,7 @@ export abstract class BaseService {
   protected readonly log: Log;
   protected readonly listenPort: ServerPort;
   protected readonly fmt: Fmt;
-  private readonly timers = new TimerManager();
+  protected readonly timers = new TimerManager();
 
   constructor(protected readonly ns: NS) {
     this.log = new Log(ns, this.constructor.name);
