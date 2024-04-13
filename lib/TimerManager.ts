@@ -7,7 +7,7 @@ interface Interval {
 }
 
 interface Timeout {
-  timeout: number;
+  timestamp: number;
   callback: () => void | Promise<void>;
 }
 
@@ -29,7 +29,7 @@ export class TimerManager {
     while (this.timeouts.has(id)) {
       id = generateId(16);
     }
-    this.timeouts.set(id, { timeout: Date.now() + ms, callback });
+    this.timeouts.set(id, { timestamp: Date.now() + ms, callback });
     return () => {
       this.timeouts.delete(id);
     };
@@ -41,7 +41,10 @@ export class TimerManager {
       ...this.intervals.map((interval) => {
         const next = interval.lastRun + interval.interval;
         return Math.max(0, next - now);
-      })
+      }),
+      ...Array.from(this.timeouts.values()).map(
+        (timeout: Timeout) => timeout.timestamp
+      )
     );
   }
 
@@ -51,6 +54,12 @@ export class TimerManager {
       if (now >= interval.lastRun + interval.interval) {
         interval.lastRun = now;
         await interval.callback();
+      }
+    }
+    for (const [id, timeout] of this.timeouts) {
+      if (now >= timeout.timestamp) {
+        this.timeouts.delete(id);
+        await timeout.callback();
       }
     }
   }

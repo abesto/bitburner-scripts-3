@@ -44,14 +44,18 @@ export const withExitCode =
 
 export class ExitCodeSubscriber {
   private readonly redis: RedisClient;
-  private lastSeen = "-";
+  private lastSeen = "$";
 
   constructor(ns: NS) {
     this.redis = redisClient(ns);
   }
 
-  async poll(): Promise<ExitCodeEvent[]> {
-    const streams = await this.redis.xread({ streams: [[KEY, this.lastSeen]] });
+  async poll(block?: number, count?: number): Promise<ExitCodeEvent[]> {
+    const streams = await this.redis.xread({
+      streams: [[KEY, this.lastSeen]],
+      block,
+      count: count ?? (block === undefined ? undefined : 1),
+    });
     const stream: RawStream = streams[KEY] ?? [];
     if (stream.length === 0) {
       return [];

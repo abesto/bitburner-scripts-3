@@ -2,20 +2,17 @@ import { BaseService } from "rpc/server";
 import { REDIS as PORT } from "rpc/PORTS";
 import {
   API,
-  RawStream,
-  SetOptions,
-  SetResult,
   StreamEntry,
   StreamID,
   XReadRequest,
   XReadResponse,
-  XaddThreshold,
 } from "./types";
 import { Minimatch } from "minimatch";
 import { CachedRedisStorage, IRedisStorage, TYPE_NAMES } from "./storage";
 import { Stream } from "./stream";
 import { TimerManager } from "lib/TimerManager";
 import { generateId } from "lib/id";
+import { APIImpl, Request, Res } from "rpc/types";
 
 class XReadSubscriber {
   // eslint-disable-next-line @typescript-eslint/no-empty-function
@@ -23,6 +20,7 @@ class XReadSubscriber {
 
   constructor(
     readonly id: string,
+    readonly db: number,
     private readonly buffer: Map<string, [StreamID, StreamEntry][]>,
     private readonly count: number,
     private readonly doRespond: (entries: XReadResponse) => Promise<void>
@@ -64,13 +62,13 @@ class XReadSubscriber {
 }
 
 class XReadBlockManager {
-  private readonly subscribers: Map<string, Map<string, XReadSubscriber>>; // key -> random subscriber id -> subscriber
+  private readonly subscribers: Map<string, Map<string, XReadSubscriber>>; // db:key -> random subscriber id -> subscriber
 
   constructor(private readonly timers: TimerManager) {
     this.subscribers = new Map();
   }
 
-  xread(
+  async xread(
     db: number,
     request: XReadRequest,
     buffer: Map<string, [StreamID, StreamEntry][]>,
@@ -91,12 +89,19 @@ class XReadBlockManager {
     }
     const subscriber = new XReadSubscriber(
       subscriberId,
+      db,
       buffer,
       request.count ?? Infinity,
       respond
     );
-    subscriber.cancelTimeout = this.timers.setTimeout(async () => {
-      await this.resolve(subscriber);
+
+    if (subscriber.isFulfilled()) {
+      await subscriber.respond();
+      return;
+    }
+
+    subscriber.cancelTimeout = this.timers.setTimeout(() => {
+      this.resolve(subscriber);
     }, request.block);
 
     for (const [key] of request.streams) {
@@ -110,12 +115,7 @@ class XReadBlockManager {
     }
   }
 
-  async xadd(
-    db: number,
-    key: string,
-    streamId: StreamID,
-    streamEntry: StreamEntry
-  ) {
+  xadd(db: number, key: string, streamId: StreamID, streamEntry: StreamEntry) {
     const subscribers = this.subscribers.get(`${db.toString()}:${key}`);
     if (!subscribers) {
       return;
@@ -124,20 +124,24 @@ class XReadBlockManager {
     for (const [, subscriber] of subscribers.entries()) {
       subscriber.xadd(key, streamId, streamEntry);
       if (subscriber.isFulfilled()) {
-        await this.resolve(subscriber);
+        this.resolve(subscriber);
       }
     }
   }
 
-  async resolve(subscriber: XReadSubscriber) {
+  resolve(subscriber: XReadSubscriber) {
     subscriber.cancelTimeout();
-    await subscriber.respond();
+    // Don't *directly* respond in here, because we may be inside of an `xadd`
+    // handler, and we don't want to yield control to *another* client.
+    this.timers.setTimeout(() => subscriber.respond(), 0);
     for (const key of subscriber.keys()) {
-      this.subscribers.get(key)?.delete(subscriber.id);
+      this.subscribers
+        .get(`${subscriber.db.toString()}:${key}`)
+        ?.delete(subscriber.id);
     }
   }
 
-  async timeout(db: number, key: string, id: string) {
+  timeout(db: number, key: string, id: string) {
     const subscribers = this.subscribers.get(`${db.toString()}:${key}`);
     if (!subscribers) {
       return;
@@ -146,7 +150,7 @@ class XReadBlockManager {
     if (!subscriber) {
       return;
     }
-    await this.resolve(subscriber);
+    this.resolve(subscriber);
   }
 
   flushdb(db: number) {
@@ -161,7 +165,7 @@ class XReadBlockManager {
   }
 }
 
-export class RedisService extends BaseService implements API {
+export class RedisService extends BaseService implements APIImpl<API> {
   private readonly xreadBlockManager: XReadBlockManager;
 
   constructor(
@@ -182,244 +186,239 @@ export class RedisService extends BaseService implements API {
     }, 1000);
   }
 
-  get: (db: number, key: string) => string | null = API.shape.get.implement(
-    (db, key) => {
-      return this.storage.read(db, "string", key);
-    }
-  );
+  get = async (req: Request, res: Res) => {
+    const [db, key] = API.shape.get.parameters().parse(req.args);
+    const value = this.storage.read(db, "string", key);
+    await res.success(API.shape.get.returnType().parse(value));
+  };
 
-  set: (
-    db: number,
-    key: string,
-    value: string,
-    options?: SetOptions
-  ) => SetResult = (db, key, value, options) =>
-    API.shape.set.implement((db, key, value, options) => {
-      let oldValue: string | undefined | null;
-      if (options.get === true) {
-        oldValue = this.storage.read(db, "string", key);
+  set = async (req: Request, res: Res) => {
+    const [db, key, value, options] = API.shape.set
+      .parameters()
+      .parse(req.args);
+    let oldValue: string | undefined | null;
+    if (options.get === true) {
+      oldValue = this.storage.read(db, "string", key);
+    }
+    this.storage.write(db, "string", key, value);
+    const result =
+      options.get === true
+        ? { setResultType: "GET", oldValue: oldValue ?? null }
+        : { setResultType: "OK" };
+    await res.success(API.shape.set.returnType().parse(result));
+  };
+
+  exists = async (req: Request, res: Res) => {
+    const [db, keys] = API.shape.exists.parameters().parse(req.args);
+    let count = 0;
+    for (const key of keys) {
+      if (this.storage.read(db, "string", key) !== null) {
+        count++;
       }
+    }
+    await res.success(API.shape.exists.returnType().parse(count));
+  };
+
+  del = async (req: Request, res: Res) => {
+    const [db, keys] = API.shape.del.parameters().parse(req.args);
+    const count = this.storage.del(db, keys);
+    await res.success(API.shape.del.returnType().parse(count));
+  };
+
+  mset = async (req: Request, res: Res) => {
+    const [db, keyValues] = API.shape.mset.parameters().parse(req.args);
+    for (const [key, value] of Object.entries(keyValues)) {
       this.storage.write(db, "string", key, value);
-      if (options.get === true) {
-        return { setResultType: "GET", oldValue: oldValue ?? null };
-      } else {
-        return { setResultType: "OK" };
-      }
-    })(db, key, value, options ?? {});
-
-  exists: (db: number, keys: [string, ...string[]]) => number =
-    API.shape.exists.implement((db, keys) => {
-      let count = 0;
-      for (const key of keys) {
-        if (this.storage.read(db, "string", key) !== null) {
-          count++;
-        }
-      }
-      return count;
-    });
-
-  del: (db: number, keys: [string, ...string[]]) => number =
-    API.shape.del.implement((db, keys) => {
-      return this.storage.del(db, keys);
-    });
-
-  mset: (db: number, keyValues: Record<string, string>) => "OK" =
-    API.shape.mset.implement((db, keyValues) => {
-      for (const [key, value] of Object.entries(keyValues)) {
-        this.storage.write(db, "string", key, value);
-      }
-      return "OK";
-    });
-
-  mget: (db: number, keys: [string, ...string[]]) => (string | null)[] =
-    API.shape.mget.implement((db, keys) => {
-      const values: (string | null)[] = [];
-      for (const key of keys) {
-        try {
-          values.push(this.storage.read(db, "string", key));
-        } catch {
-          values.push(null);
-        }
-      }
-      return values;
-    });
-
-  keys: (db: number, pattern: string) => string[] = API.shape.keys.implement(
-    (db, pattern) => {
-      const keys = [];
-      const mm = new Minimatch(pattern);
-      for (const key of this.storage.keys(db)) {
-        if (mm.match(key)) {
-          keys.push(key);
-        }
-      }
-      return keys;
     }
-  );
+    await res.success(API.shape.mset.returnType().parse("OK"));
+  };
 
-  sadd: (db: number, key: string, values: [string, ...string[]]) => number =
-    API.shape.sadd.implement((db, key, values) => {
-      const set = this.storage.read(db, "set", key) ?? new Set<string>();
-
-      let added = 0;
-      for (const value of values) {
-        if (!set.has(value)) {
-          set.add(value);
-          added++;
-        }
+  mget = async (req: Request, res: Res) => {
+    const [db, keys] = API.shape.mget.parameters().parse(req.args);
+    const values: (string | null)[] = [];
+    for (const key of keys) {
+      try {
+        values.push(this.storage.read(db, "string", key));
+      } catch {
+        values.push(null);
       }
+    }
+    await res.success(API.shape.mget.returnType().parse(values));
+  };
 
-      this.storage.write(db, "set", key, set);
-
-      return added;
-    });
-
-  smembers: (db: number, key: string) => string[] =
-    API.shape.smembers.implement((db, key) => {
-      const set = this.storage.read(db, "set", key);
-      if (set === null) {
-        return [];
+  keys = async (req: Request, res: Res) => {
+    const [db, pattern] = API.shape.keys.parameters().parse(req.args);
+    const keys = [];
+    const mm = new Minimatch(pattern);
+    for (const key of this.storage.keys(db)) {
+      if (mm.match(key)) {
+        keys.push(key);
       }
-      return Array.from(set);
-    });
+    }
+    await res.success(API.shape.keys.returnType().parse(keys));
+  };
 
-  srem: (db: number, key: string, values: [string, ...string[]]) => number =
-    API.shape.srem.implement((db, key, values) => {
-      const set = this.storage.read(db, "set", key);
-      if (set === null) {
-        return 0;
+  sadd = async (req: Request, res: Res) => {
+    const [db, key, values] = API.shape.sadd.parameters().parse(req.args);
+    const set = this.storage.read(db, "set", key) ?? new Set<string>();
+
+    let added = 0;
+    for (const value of values) {
+      if (!set.has(value)) {
+        set.add(value);
+        added++;
       }
+    }
 
-      let removed = 0;
+    this.storage.write(db, "set", key, set);
+
+    await res.success(API.shape.sadd.returnType().parse(added));
+  };
+
+  smembers = async (req: Request, res: Res) => {
+    const [db, key] = API.shape.smembers.parameters().parse(req.args);
+    const set = this.storage.read(db, "set", key);
+    const values = set === null ? [] : Array.from(set);
+    await res.success(API.shape.smembers.returnType().parse(values));
+  };
+
+  srem = async (req: Request, res: Res) => {
+    const [db, key, values] = API.shape.srem.parameters().parse(req.args);
+    const set = this.storage.read(db, "set", key);
+
+    let removed = 0;
+
+    if (set !== null) {
       for (const value of values) {
         if (set.delete(value)) {
           removed++;
         }
       }
-
       this.storage.write(db, "set", key, set);
-      return removed;
-    });
-
-  xadd: (
-    db: number,
-    key: string,
-    streamId: StreamID,
-    fieldValues: StreamEntry,
-    threshold?: XaddThreshold
-  ) => string = (db, key, streamId, fieldValues, threshold) =>
-    API.shape.xadd.implement((db, key, streamId, fieldValues) => {
-      const stream = this.storage.read(db, "stream", key) ?? new Stream();
-
-      if (streamId === "*") {
-        const timestamp = Date.now().toString();
-        const existing = stream.prefix(timestamp);
-        streamId = `${timestamp}-${existing.length.toString()}`;
-      }
-      stream.add(streamId, fieldValues);
-
-      if (threshold?.type === "maxlen") {
-        stream.trimMaxLength(threshold.count);
-      } else if (threshold?.type === "minid") {
-        stream.trimMinId(threshold.id);
-      }
-
-      this.storage.write(db, "stream", key, stream);
-      return streamId;
-    })(db, key, streamId, fieldValues, threshold);
-
-  xlen: (db: number, key: string) => number = API.shape.xlen.implement(
-    (db, key) => {
-      return this.storage.read(db, "stream", key)?.length || 0;
     }
-  );
 
-  xrange: (
-    db: number,
-    key: string,
-    start: string,
-    end?: string,
-    count?: number
-  ) => RawStream = (db, key, start, end, count) =>
-    API.shape.xrange.implement((db, key, start, end, count) => {
-      const stream = this.storage.read(db, "stream", key);
-      if (stream === null) {
-        return [];
-      }
+    await res.success(API.shape.srem.returnType().parse(removed));
+  };
 
-      const startExclusive = start[0] === "(";
-      const endExclusive = end[0] === "(";
-      if (startExclusive) {
-        start = start.slice(1);
-      }
-      if (endExclusive) {
-        end = end.slice(1);
-      }
+  xadd = async (req: Request, res: Res) => {
+    const [db, key, streamIdInput, fieldValues, threshold] = API.shape.xadd
+      .parameters()
+      .parse(req.args);
+    const stream = this.storage.read(db, "stream", key) ?? new Stream();
 
-      const entries = stream.range(start, end, count);
-      if (startExclusive && entries[0]?.[0] === start) {
-        entries.shift();
-      }
-      if (endExclusive && entries[entries.length - 1]?.[0] === end) {
-        entries.pop();
-      }
-      return entries;
-    })(db, key, start, end ?? "+", count ?? Infinity);
+    let streamId = streamIdInput;
+    if (streamId === "*") {
+      const timestamp = Date.now().toString();
+      const existing = stream.prefix(timestamp);
+      streamId = `${timestamp}-${existing.length.toString()}`;
+    }
+    stream.add(streamId, fieldValues);
 
-  type: (db: number, key: string) => "string" | "set" | "stream" | "none" =
-    API.shape.type.implement((db, key) => {
-      for (const type of TYPE_NAMES) {
-        try {
-          if (this.storage.read(db, type, key) !== null) {
-            return type;
-          }
-        } catch {
-          // That's fine, try something else
+    if (threshold?.type === "maxlen") {
+      stream.trimMaxLength(threshold.count);
+    } else if (threshold?.type === "minid") {
+      stream.trimMinId(threshold.id);
+    }
+
+    this.storage.write(db, "stream", key, stream);
+    this.xreadBlockManager.xadd(db, key, streamId, fieldValues);
+
+    await res.success(API.shape.xadd.returnType().parse(streamId));
+  };
+
+  xlen = async (req: Request, res: Res) => {
+    const [db, key] = API.shape.xlen.parameters().parse(req.args);
+    const len = this.storage.read(db, "stream", key)?.length || 0;
+    await res.success(API.shape.xlen.returnType().parse(len));
+  };
+
+  xrange = async (req: Request, res: Res) => {
+    const [db, key, startInput, endInput, count] = API.shape.xrange
+      .parameters()
+      .parse(req.args);
+    const stream = this.storage.read(db, "stream", key);
+    if (stream === null) {
+      await res.success(API.shape.xrange.returnType().parse([]));
+      return;
+    }
+
+    const startExclusive = startInput[0] === "(";
+    const endExclusive = endInput[0] === "(";
+    const start = startExclusive ? startInput.slice(1) : startInput;
+    const end = endExclusive ? endInput.slice(1) : endInput;
+
+    const entries = stream.range(start, end, count);
+    if (startExclusive && entries[0]?.[0] === start) {
+      entries.shift();
+    }
+    if (endExclusive && entries[entries.length - 1]?.[0] === end) {
+      entries.pop();
+    }
+
+    await res.success(API.shape.xrange.returnType().parse(entries));
+  };
+
+  type = async (req: Request, res: Res) => {
+    const [db, key] = API.shape.type.parameters().parse(req.args);
+    let ret = "none";
+    for (const type of TYPE_NAMES) {
+      try {
+        if (this.storage.read(db, type, key) !== null) {
+          ret = type;
+          break;
         }
+      } catch {
+        // That's fine, try something else
       }
-      return "none";
-    });
+    }
+    await res.success(API.shape.type.returnType().parse(ret));
+  };
 
-  flushdb: (db: number) => "OK" = API.shape.flushdb.implement((db) => {
+  flushdb = async (req: Request, res: Res) => {
+    const [db] = API.shape.flushdb.parameters().parse(req.args);
     for (const key of this.storage.keys(db)) {
       this.storage.del(db, [key]);
     }
     this.xreadBlockManager.flushdb(db);
-    return "OK";
-  });
+    await res.success(API.shape.flushdb.returnType().parse("OK"));
+  };
 
-  xread: (db: number, request: XReadRequest) => XReadResponse =
-    API.shape.xread.implement((db, request) => {
-      const response = new Map<string, [StreamID, StreamEntry][]>();
-      for (const [key, id] of request.streams) {
-        const stream = this.storage.read(db, "stream", key);
-        if (stream === null) {
-          response.set(key, []);
-          continue;
-        }
+  xread = async (req: Request, res: Res) => {
+    const [db, request] = API.shape.xread.parameters().parse(req.args);
+    const existing = new Map<string, [StreamID, StreamEntry][]>();
 
-        if (id === "$") {
-          response.set(key, []);
-          continue;
-        }
-        const entries = stream.range(id, "+", request.count);
-        if (entries[0]?.[0] === id) {
-          entries.shift();
-        }
-        response.set(key, entries);
+    for (const [key, id] of request.streams) {
+      const stream = this.storage.read(db, "stream", key);
+      if (stream === null) {
+        existing.set(key, []);
+        continue;
       }
-
-      if (request.block !== undefined) {
-        this.xreadBlockManager.xread(
-          db,
-          request,
-          response,
-          async (response) => {
-            await this.respond(response);
-          }
-        );
+      if (id === "$") {
+        existing.set(key, []);
+        continue;
       }
+      const entries = stream.range(id, "+", request.count);
+      if (entries[0]?.[0] === id) {
+        entries.shift();
+      }
+      existing.set(key, entries);
+    }
 
-      return Object.fromEntries(response.entries());
-    });
+    if (request.block !== undefined) {
+      await this.xreadBlockManager.xread(
+        db,
+        request,
+        existing,
+        async (response) => {
+          await res.success(API.shape.xread.returnType().parse(response));
+        }
+      );
+    } else {
+      await res.success(
+        API.shape.xread
+          .returnType()
+          .parse(Object.fromEntries(existing.entries()))
+      );
+    }
+  };
 }

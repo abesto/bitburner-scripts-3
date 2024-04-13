@@ -1,9 +1,8 @@
 import { rpcClient } from "rpc/client";
 import { REDIS as PORT } from "rpc/PORTS";
-import type { RedisService } from "./server";
 import { API } from "./types";
 
-export const rawRedisClient = (ns: NS) => rpcClient<RedisService>(ns, PORT);
+export const rawRedisClient = (ns: NS) => rpcClient<API>(ns, PORT);
 
 type BoundDb<T> = T extends [number, ...infer U] ? U : never;
 type BoundDbFunction<T> = T extends (db: number, ...rest: infer U) => infer R
@@ -18,7 +17,6 @@ export const redisClient = (ns: NS, db = 0) => {
 
   const ext = {
     select: (newDb: number) => (db = newDb),
-    getPortNumber: inner.getPortNumber,
     currentDb: () => db,
   };
 

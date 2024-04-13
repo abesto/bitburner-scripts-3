@@ -135,7 +135,7 @@ export const main = async (ns: NS) => {
   } else if (command === "sadd" || command === "srem") {
     const values = args.splice(1) as string[];
     extraArgs.push(values);
-  } else if (command === "del" || command === "mget") {
+  } else if (command === "del" || command === "mget" || command === "exists") {
     extraArgs.push(args.splice(0));
   } else if (command === "mset") {
     const obj = buildKeyValues(args.splice(0));

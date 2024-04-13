@@ -124,11 +124,11 @@ export const TaskListQuery = z.object({
 export type TaskListQuery = z.infer<typeof TaskListQuery>;
 
 export const API = z.object({
-  swarmCapacity: z.function().returns(SwarmCapacity.promise()),
+  swarmCapacity: z.function().returns(SwarmCapacity),
   swarmJoin: z
     .function()
     .args(z.string().describe("hostname"))
-    .returns(z.void().promise()),
+    .returns(z.void()),
 
   serviceCreate: z
     .function()
@@ -140,7 +140,7 @@ export const API = z.object({
         mode: ServiceMode,
       })
     )
-    .returns(z.string().promise().describe("created service id")),
+    .returns(z.string().describe("created service id")),
 
   // The real API takes a boolean that controls whether `ServiceStatus` is included.
   // That makes typing tricky, and the optimization doesn't really matter for us,
@@ -150,20 +150,20 @@ export const API = z.object({
     .args
     // TODO this is where filters would live
     ()
-    .returns(ServiceWithStatus.array().promise()),
+    .returns(ServiceWithStatus.array()),
 
   serviceInspect: z
     .function()
     .args(z.string().describe("ID or service name"))
-    .returns(ServiceWithStatus.promise()),
+    .returns(ServiceWithStatus),
 
-  serviceDelete: z.function().args(ServiceID).returns(z.void().promise()),
+  serviceDelete: z.function().args(ServiceID).returns(z.void()),
 
   serviceUpdate: z
     .function()
     .args(ServiceID, z.number().describe("version"), ServiceSpec)
-    .returns(z.void().promise()),
+    .returns(z.void()),
 
-  taskList: z.function().args(TaskListQuery).returns(Task.array().promise()),
+  taskList: z.function().args(TaskListQuery).returns(Task.array()),
 });
 export type API = z.infer<typeof API>;

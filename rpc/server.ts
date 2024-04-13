@@ -1,6 +1,12 @@
 import { Log } from "lib/log";
 import { ServerPort } from "./transport/ServerPort";
-import { Request, Response, errorResponse, successResponse } from "./types";
+import {
+  Handler,
+  Request,
+  Response,
+  errorResponse,
+  successResponse,
+} from "./types";
 import { Fmt, highlightJSON } from "lib/fmt";
 import { TimerManager } from "lib/TimerManager";
 import { ClientPort } from "./transport/ClientPort";
@@ -52,40 +58,20 @@ export abstract class BaseService {
       throwOnTimeout: false,
     }));
 
-  private async executeWithoutResponse(
-    methodName: string,
-    method: (...args: unknown[]) => unknown,
-    args: unknown[]
-  ): Promise<void> {
+  private async execute(handler: Handler, request: Request): Promise<void> {
     try {
-      await method(...args);
+      await handler(request, {
+        success: async (ret) => {
+          await this.respondSuccess(request, ret);
+        },
+        error: this.respondError.bind(this, request),
+      });
     } catch (error) {
       this.log.error("execute-error", {
         error: maybeZodErrorMessage(error),
-        method: methodName,
-        args,
+        method: request.method,
+        args: request.args,
       });
-    }
-  }
-
-  private async executeWithResponse(
-    methodName: string,
-    method: (...args: unknown[]) => unknown,
-    args: unknown[],
-    msgId: string
-  ): Promise<Response> {
-    try {
-      const result = await method(...args);
-      return successResponse(msgId, result);
-    } catch (error) {
-      this.log.error("execute-error", {
-        error: maybeZodErrorMessage(error),
-        stack: error instanceof Error ? error.stack : undefined,
-        msgId,
-        method: methodName,
-        args,
-      });
-      return errorResponse(msgId, maybeZodErrorMessage(error));
     }
   }
 
@@ -98,12 +84,12 @@ export abstract class BaseService {
     }
 
     const request = maybeRequest.data;
-    const method = Reflect.get(this, request.method);
-    if (typeof method !== "function") {
+    const handler = Reflect.get(this, request.method) as Handler;
+    if (typeof handler !== "function") {
       this.log.error("method-not-found", { request });
       if (request.responseMeta !== undefined) {
         await this.respond(
-          request.responseMeta.port,
+          request,
           errorResponse(
             request.responseMeta.msgId,
             `Requested method doesn't exist: ${request.method}`
@@ -113,35 +99,47 @@ export abstract class BaseService {
       return;
     }
 
-    const f = method as (...args: unknown[]) => unknown;
-    if (request.responseMeta === undefined) {
-      await this.executeWithoutResponse(request.method, f, request.args);
-      this.log.debug(
-        `${request.method}(${request.args.map(highlightJSON).join(", ")})`
-      );
-    } else {
-      const response = await this.executeWithResponse(
-        request.method,
-        f,
-        request.args,
-        request.responseMeta.msgId
-      );
-      //this.log.debug("res", { request, response });
-      this.log.debug(
-        `${request.method}(${request.args
-          .map(highlightJSON)
-          .join(", ")}) => ${highlightJSON(
-          response.status === "success" ? response.result : response.error
-        )} (client: ${request.responseMeta.port.toString()})`
-      );
-      await this.respond(request.responseMeta.port, response);
-    }
+    this.log.debug(
+      `${request.responseMeta?.port.toString() ?? "unknown"} => ${
+        request.method
+      }(${request.args.map(highlightJSON).join(", ")})`
+    );
+
+    await this.execute(handler, request);
   };
 
-  private async respond(portNumber: number, response: Response) {
-    const port = new ClientPort(this.ns, portNumber);
+  private async respond(request: Request, response: Response) {
+    if (request.responseMeta === undefined) {
+      return;
+    }
+    this.log.debug(
+      `${request.responseMeta.port.toString()} <= ${highlightJSON(
+        response.status === "success" ? response.result : response.error
+      )}`
+    );
+    const port = new ClientPort(this.ns, request.responseMeta.port);
     port.writeSync(response);
     await this.ns.sleep(0);
+  }
+
+  private async respondSuccess(request: Request, result: unknown) {
+    if (request.responseMeta === undefined) {
+      return;
+    }
+    await this.respond(
+      request,
+      successResponse(request.responseMeta.msgId, result)
+    );
+  }
+
+  private async respondError(request: Request, error: string) {
+    if (request.responseMeta === undefined) {
+      return;
+    }
+    await this.respond(
+      request,
+      errorResponse(request.responseMeta.msgId, error)
+    );
   }
 
   private async yieldIfNeeded(): Promise<void> {

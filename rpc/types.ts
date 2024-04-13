@@ -53,3 +53,16 @@ export class RpcError extends Error {
     this.name = "RpcError";
   }
 }
+
+export interface Res {
+  success: (result: unknown) => Promise<void>;
+  error: (error: string) => Promise<void>;
+}
+
+export type Handler = (req: Request, res: Res) => void | Promise<void>;
+
+export type APIImpl<T> = {
+  [K in keyof T]: T[K] extends (...args: infer Args) => unknown
+    ? Handler
+    : never;
+};

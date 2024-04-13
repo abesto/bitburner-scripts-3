@@ -5,20 +5,14 @@ import { allocateThreads, calculateHostCandidates } from "./algorithms";
 import { generateId } from "lib/id";
 import {
   API,
-  Labels,
   PlacementConstraint,
   Service,
-  ServiceMode,
-  ServiceName,
-  ServiceSpec,
   ServiceStatus,
-  SwarmCapacity,
   SwarmCapacityEntry,
   Task,
-  TaskListQuery,
-  TaskSpec,
 } from "./types";
 import { TimerManager } from "lib/TimerManager";
+import { APIImpl, Request, Res } from "rpc/types";
 
 const REDIS_KEYS = {
   NODES: "docker:swarm:nodes",
@@ -32,7 +26,7 @@ const REDIS_KEYS = {
 
 const ID_BYTES = 8;
 
-export class DockerService extends BaseService implements API {
+export class DockerService extends BaseService implements APIImpl<API> {
   private readonly redis: RedisClient;
 
   constructor(ns: NS) {
@@ -141,7 +135,7 @@ export class DockerService extends BaseService implements API {
 
     const script = service.spec.taskTemplate.containerSpec.command;
     const scriptRam = this.ns.getScriptRam(script);
-    const capacity = await this.swarmCapacity();
+    const capacity = await this.getSwarmCapacity();
     const hostnames = service.spec.taskTemplate.placement.constraints
       .map((s) => PlacementConstraint.parse(s))
       // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
@@ -237,90 +231,90 @@ export class DockerService extends BaseService implements API {
     }
   };
 
-  swarmCapacity: () => Promise<SwarmCapacity> =
-    API.shape.swarmCapacity.implement(async () => {
-      const total = { used: 0, max: 0 };
-      const hosts: Record<string, SwarmCapacityEntry> = {};
+  private getSwarmCapacity = async () => {
+    const total = { used: 0, max: 0 };
+    const hosts: Record<string, SwarmCapacityEntry> = {};
 
-      const hostnames = await this.redis.smembers(REDIS_KEYS.NODES);
-      for (const hostname of hostnames) {
-        if (!this.ns.hasRootAccess(hostname)) {
-          this.log.twarn("leaving", { hostname, reason: "no-root" });
-          await this.redis.srem(REDIS_KEYS.NODES, [hostname]);
-          continue;
-        }
-        const capacity = {
-          max: this.ns.getServerMaxRam(hostname),
-          used: this.ns.getServerUsedRam(hostname),
-        };
-        total.used += capacity.used;
-        total.max += capacity.max;
-        hosts[hostname] = capacity;
-      }
-
-      return {
-        total,
-        hosts,
-      };
-    });
-
-  swarmJoin: (hostname: string) => Promise<void> =
-    API.shape.swarmJoin.implement(async (hostname) => {
+    const hostnames = await this.redis.smembers(REDIS_KEYS.NODES);
+    for (const hostname of hostnames) {
       if (!this.ns.hasRootAccess(hostname)) {
-        throw new Error(`no root access: ${hostname}`);
+        this.log.twarn("leaving", { hostname, reason: "no-root" });
+        await this.redis.srem(REDIS_KEYS.NODES, [hostname]);
+        continue;
       }
-      if ((await this.redis.sadd(REDIS_KEYS.NODES, [hostname])) === 1) {
-        this.log.info("join", { hostname, result: "success" });
-      } else {
-        this.log.debug("join", {
-          hostname,
-          result: "skip",
-          reason: "already-joined",
-        });
-      }
+      const capacity = {
+        max: this.ns.getServerMaxRam(hostname),
+        used: this.ns.getServerUsedRam(hostname),
+      };
+      total.used += capacity.used;
+      total.max += capacity.max;
+      hosts[hostname] = capacity;
+    }
+    return { total, hosts };
+  };
+
+  swarmCapacity = async (req: Request, res: Res) => {
+    API.shape.swarmCapacity.parameters().parse(req.args);
+    await res.success(
+      API.shape.swarmCapacity.returnType().parse(await this.getSwarmCapacity())
+    );
+  };
+
+  swarmJoin = async (req: Request, res: Res) => {
+    const [hostname] = API.shape.swarmJoin.parameters().parse(req.args);
+    if (!this.ns.hasRootAccess(hostname)) {
+      throw new Error(`no root access: ${hostname}`);
+    }
+    if ((await this.redis.sadd(REDIS_KEYS.NODES, [hostname])) === 1) {
+      this.log.info("join", { hostname, result: "success" });
+    } else {
+      this.log.debug("join", {
+        hostname,
+        result: "skip",
+        reason: "already-joined",
+      });
+    }
+
+    await res.success(API.shape.swarmJoin.returnType().parse(undefined));
+  };
+
+  serviceCreate = async (req: Request, res: Res) => {
+    const [{ name, labels, taskTemplate, mode }] = API.shape.serviceCreate
+      .parameters()
+      .parse(req.args);
+    const script = taskTemplate.containerSpec.command;
+    if (!this.ns.fileExists(script)) {
+      throw new Error(`script not found: ${script}`);
+    }
+    if (await this.redis.exists([REDIS_KEYS.SERVICE_BY_NAME(name)])) {
+      throw new Error(`service already exists: ${name}`);
+    }
+
+    let serviceId = generateId(ID_BYTES);
+    while (await this.redis.exists([REDIS_KEYS.SERVICE(serviceId)])) {
+      serviceId = generateId(ID_BYTES);
+    }
+
+    const service: Service = {
+      id: serviceId,
+      version: 0,
+      spec: {
+        name,
+        labels,
+        taskTemplate,
+        mode,
+      },
+    };
+
+    await this.redis.sadd(REDIS_KEYS.SERVICES, [serviceId]);
+    await this.redis.mset({
+      [REDIS_KEYS.SERVICE_BY_NAME(name)]: serviceId,
+      [REDIS_KEYS.SERVICE(serviceId)]: JSON.stringify(service),
     });
 
-  serviceCreate: (req: {
-    name: ServiceName;
-    labels: Labels;
-    taskTemplate: TaskSpec;
-    mode: ServiceMode;
-  }) => Promise<string> = API.shape.serviceCreate.implement(
-    async ({ name, labels, taskTemplate, mode }) => {
-      const script = taskTemplate.containerSpec.command;
-      if (!this.ns.fileExists(script)) {
-        throw new Error(`script not found: ${script}`);
-      }
-      if (await this.redis.exists([REDIS_KEYS.SERVICE_BY_NAME(name)])) {
-        throw new Error(`service already exists: ${name}`);
-      }
-
-      let serviceId = generateId(ID_BYTES);
-      while (await this.redis.exists([REDIS_KEYS.SERVICE(serviceId)])) {
-        serviceId = generateId(ID_BYTES);
-      }
-
-      const service: Service = {
-        id: serviceId,
-        version: 0,
-        spec: {
-          name,
-          labels,
-          taskTemplate,
-          mode,
-        },
-      };
-
-      await this.redis.sadd(REDIS_KEYS.SERVICES, [serviceId]);
-      await this.redis.mset({
-        [REDIS_KEYS.SERVICE_BY_NAME(name)]: serviceId,
-        [REDIS_KEYS.SERVICE(serviceId)]: JSON.stringify(service),
-      });
-
-      await this.scaleUp(service);
-      return serviceId;
-    }
-  );
+    await this.scaleUp(service);
+    await res.success(API.shape.serviceCreate.returnType().parse(serviceId));
+  };
 
   private serviceStatus = (service: Service, tasks: Task[]): ServiceStatus => {
     const completedThreads = tasks
@@ -342,36 +336,42 @@ export class DockerService extends BaseService implements API {
     };
   };
 
-  serviceInspect: (
-    serviceIdOrName: string
-  ) => Promise<Service & { serviceStatus: ServiceStatus }> =
-    API.shape.serviceInspect.implement(async (serviceIdOrName) => {
-      const service = await this.lookupService(serviceIdOrName);
-      if (service === null) {
-        throw new Error(`service not found: ${serviceIdOrName}`);
-      }
-      const tasks = await this.lookupTasks(service.id);
-      return {
+  serviceInspect = async (req: Request, res: Res) => {
+    const [serviceIdOrName] = API.shape.serviceInspect
+      .parameters()
+      .parse(req.args);
+    const service = await this.lookupService(serviceIdOrName);
+    if (service === null) {
+      throw new Error(`service not found: ${serviceIdOrName}`);
+    }
+    const tasks = await this.lookupTasks(service.id);
+    await res.success(
+      API.shape.serviceInspect.returnType().parse({
         ...service,
         serviceStatus: this.serviceStatus(service, tasks),
-      };
-    });
+      })
+    );
+  };
 
-  serviceList: () => Promise<(Service & { serviceStatus: ServiceStatus })[]> =
-    API.shape.serviceList.implement(async () => {
-      const services = await this.lookupAllServices();
+  serviceList = async (req: Request, res: Res) => {
+    API.shape.serviceList.parameters().parse(req.args);
+    const services = await this.lookupAllServices();
 
-      const tasks: Task[][] = [];
-      for (const service of services) {
-        tasks.push(await this.lookupTasks(service.id));
-      }
+    const tasks: Task[][] = [];
+    for (const service of services) {
+      tasks.push(await this.lookupTasks(service.id));
+    }
 
-      return services.map((s, i) => ({
-        ...s,
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        serviceStatus: this.serviceStatus(s, tasks[i]!),
-      }));
-    });
+    await res.success(
+      API.shape.serviceList.returnType().parse(
+        services.map((s, i) => ({
+          ...s,
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          serviceStatus: this.serviceStatus(s, tasks[i]!),
+        }))
+      )
+    );
+  };
 
   private async lookupAllServices(): Promise<Service[]> {
     const serviceIds = await this.redis.smembers(REDIS_KEYS.SERVICES);
@@ -416,27 +416,30 @@ export class DockerService extends BaseService implements API {
       .map((t) => Task.parse(JSON.parse(t as string)));
   }
 
-  serviceDelete: (serviceIdOrName: string) => Promise<void> =
-    API.shape.serviceDelete.implement(async (serviceIdOrName) => {
-      const service = await this.lookupService(serviceIdOrName);
-      if (service === null) {
-        throw new Error(`service not found: ${serviceIdOrName}`);
-      }
+  serviceDelete = async (req: Request, res: Res) => {
+    const [serviceIdOrName] = API.shape.serviceDelete
+      .parameters()
+      .parse(req.args);
+    const service = await this.lookupService(serviceIdOrName);
+    if (service === null) {
+      throw new Error(`service not found: ${serviceIdOrName}`);
+    }
 
-      const tasks = await this.lookupTasks(service.id);
-      for (const task of tasks) {
-        this.ns.kill(task.pid as unknown as string);
-      }
+    const tasks = await this.lookupTasks(service.id);
+    for (const task of tasks) {
+      this.ns.kill(task.pid as unknown as string);
+    }
 
-      const taskKeys = await this.redis.smembers(REDIS_KEYS.TASKS(service.id));
-      await this.redis.del([
-        REDIS_KEYS.SERVICE(service.id),
-        REDIS_KEYS.SERVICE_BY_NAME(service.spec.name),
-        REDIS_KEYS.TASKS(service.id),
-        ...taskKeys,
-      ]);
-      await this.redis.srem(REDIS_KEYS.SERVICES, [service.id]);
-    });
+    const taskKeys = await this.redis.smembers(REDIS_KEYS.TASKS(service.id));
+    await this.redis.del([
+      REDIS_KEYS.SERVICE(service.id),
+      REDIS_KEYS.SERVICE_BY_NAME(service.spec.name),
+      REDIS_KEYS.TASKS(service.id),
+      ...taskKeys,
+    ]);
+    await this.redis.srem(REDIS_KEYS.SERVICES, [service.id]);
+    await res.success(API.shape.serviceDelete.returnType().parse(undefined));
+  };
 
   private taskFilterServiceIds = async (input: string[]): Promise<string[]> => {
     if (input.length === 0) {
@@ -459,43 +462,45 @@ export class DockerService extends BaseService implements API {
       .filter((id) => id !== null) as string[];
   };
 
-  taskList: (query: TaskListQuery) => Promise<Task[]> =
-    API.shape.taskList.implement(async (query) => {
-      // This will need significant changes if we ever support more than one filter type
-      const serviceIds = await this.taskFilterServiceIds(
-        query.filters.service ?? []
-      );
-      return await Promise.all(
-        serviceIds.map((id) => this.lookupTasks(id))
-      ).then((tasks) => tasks.flat());
-    });
-
-  serviceUpdate: (
-    idOrName: string,
-    version: number,
-    newSpec: ServiceSpec
-  ) => Promise<void> = API.shape.serviceUpdate.implement(
-    async (idOrName, version, newSpec) => {
-      const service = await this.lookupService(idOrName);
-      if (service === null) {
-        throw new Error(`service not found: ${idOrName}`);
-      }
-      if (service.version !== version) {
-        throw new Error(
-          `service version mismatch: expected ${service.version.toString()} got ${version.toString()}`
-        );
-      }
-
-      // We could be much smarter about this probably, but... good enough?
-      service.spec = newSpec;
-      service.version += 1;
-      await this.redis.set(
-        REDIS_KEYS.SERVICE(service.id),
-        JSON.stringify(service)
-      );
-
-      await this.scaleDown(service);
-      await this.scaleUp(service);
+  taskList = async (req: Request, res: Res) => {
+    const [query] = API.shape.taskList.parameters().parse(req.args);
+    // This will need significant changes if we ever support more than one filter type
+    const serviceIds = await this.taskFilterServiceIds(
+      query.filters.service ?? []
+    );
+    let tasks: Task[] = [];
+    for (const id of serviceIds) {
+      tasks = tasks.concat(await this.lookupTasks(id));
     }
-  );
+    await res.success(API.shape.taskList.returnType().parse(tasks));
+  };
+
+  serviceUpdate = async (req: Request, res: Res) => {
+    const [idOrName, version, newSpec] = API.shape.serviceUpdate
+      .parameters()
+      .parse(req.args);
+    const service = await this.lookupService(idOrName);
+    if (service === null) {
+      throw new Error(`service not found: ${idOrName}`);
+    }
+    if (service.version !== version) {
+      throw new Error(
+        `service version mismatch: expected ${service.version.toString()} got ${version.toString()}`
+      );
+    }
+
+    // We could be much smarter about this probably, but... good enough?
+    service.spec = newSpec;
+    service.version += 1;
+    await this.redis.set(
+      REDIS_KEYS.SERVICE(service.id),
+      JSON.stringify(service),
+      {}
+    );
+
+    await this.scaleDown(service);
+    await this.scaleUp(service);
+
+    await res.success(API.shape.serviceUpdate.returnType().parse(undefined));
+  };
 }
