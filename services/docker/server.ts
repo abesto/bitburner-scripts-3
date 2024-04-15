@@ -22,6 +22,7 @@ const REDIS_KEYS = {
   TASKS: (serviceId: string) => `docker:service:${serviceId}:tasks`,
   TASK: (serviceId: string, taskId: string) =>
     `docker:service:${serviceId}:task:${taskId}`,
+  PID_TO_TASK: (pid: number) => `docker:pid:${pid.toString()}`, // value: Redis key of the task (docker:service:ID:task:ID)
 };
 
 const ID_BYTES = 8;
@@ -222,6 +223,12 @@ export class DockerService extends BaseService implements APIImpl<API> {
       ...Object.fromEntries(
         tasks.map((t) => [REDIS_KEYS.TASK(service.id, t.id), JSON.stringify(t)])
       ),
+      ...Object.fromEntries(
+        tasks.map((t) => [
+          REDIS_KEYS.PID_TO_TASK(t.pid),
+          REDIS_KEYS.TASK(service.id, t.id),
+        ])
+      ),
     });
     if (tasks.length > 0) {
       await this.redis.sadd(
@@ -275,7 +282,7 @@ export class DockerService extends BaseService implements APIImpl<API> {
       });
     }
 
-    await res.success(API.shape.swarmJoin.returnType().parse(undefined));
+    await res.success(API.shape.swarmJoin.returnType().parse("OK"));
   };
 
   serviceCreate = async (req: Request, res: Res) => {
@@ -436,9 +443,10 @@ export class DockerService extends BaseService implements APIImpl<API> {
       REDIS_KEYS.SERVICE_BY_NAME(service.spec.name),
       REDIS_KEYS.TASKS(service.id),
       ...taskKeys,
+      ...tasks.map((t) => REDIS_KEYS.PID_TO_TASK(t.pid)),
     ]);
     await this.redis.srem(REDIS_KEYS.SERVICES, [service.id]);
-    await res.success(API.shape.serviceDelete.returnType().parse(undefined));
+    await res.success(API.shape.serviceDelete.returnType().parse("OK"));
   };
 
   private taskFilterServiceIds = async (input: string[]): Promise<string[]> => {
@@ -501,6 +509,25 @@ export class DockerService extends BaseService implements APIImpl<API> {
     await this.scaleDown(service);
     await this.scaleUp(service);
 
-    await res.success(API.shape.serviceUpdate.returnType().parse(undefined));
+    await res.success(API.shape.serviceUpdate.returnType().parse("OK"));
+  };
+
+  taskCompleted = async (req: Request, res: Res) => {
+    const [pid] = API.shape.taskCompleted.parameters().parse(req.args);
+    const taskKey = await this.redis.get(REDIS_KEYS.PID_TO_TASK(pid));
+    if (taskKey === null) {
+      throw new Error(`task not found: ${pid.toString()}`);
+    }
+    const taskRaw = await this.redis.get(taskKey);
+    if (taskRaw === null) {
+      throw new Error(`task not found: ${taskKey}`);
+    }
+    const task = Task.parse(JSON.parse(taskRaw));
+    task.status = {
+      timestamp: new Date().toISOString(),
+      status: "complete",
+    };
+    await this.redis.set(taskKey, JSON.stringify(task), {});
+    await res.success(API.shape.taskCompleted.returnType().parse("OK"));
   };
 }

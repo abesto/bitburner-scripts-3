@@ -128,7 +128,7 @@ export const API = z.object({
   swarmJoin: z
     .function()
     .args(z.string().describe("hostname"))
-    .returns(z.void()),
+    .returns(z.literal("OK")),
 
   serviceCreate: z
     .function()
@@ -157,13 +157,20 @@ export const API = z.object({
     .args(z.string().describe("ID or service name"))
     .returns(ServiceWithStatus),
 
-  serviceDelete: z.function().args(ServiceID).returns(z.void()),
+  serviceDelete: z.function().args(ServiceID).returns(z.literal("OK")),
 
   serviceUpdate: z
     .function()
     .args(ServiceID, z.number().describe("version"), ServiceSpec)
-    .returns(z.void()),
+    .returns(z.literal("OK")),
 
   taskList: z.function().args(TaskListQuery).returns(Task.array()),
+
+  // Other ways of getting "task is finished" to the service are much more complex
+  // to implement well
+  taskCompleted: z
+    .function()
+    .args(z.number().describe("pid"))
+    .returns(z.literal("OK")),
 });
 export type API = z.infer<typeof API>;

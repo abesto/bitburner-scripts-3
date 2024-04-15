@@ -42,8 +42,8 @@ export class TimerManager {
         const next = interval.lastRun + interval.interval;
         return Math.max(0, next - now);
       }),
-      ...Array.from(this.timeouts.values()).map(
-        (timeout: Timeout) => timeout.timestamp
+      ...Array.from(this.timeouts.values()).map((timeout: Timeout) =>
+        Math.max(timeout.timestamp - Date.now())
       )
     );
   }

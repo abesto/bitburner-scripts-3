@@ -12,20 +12,187 @@ import { TimerManager } from "lib/TimerManager";
 import { ClientPort } from "./transport/ClientPort";
 import { fromZodError } from "zod-validation-error";
 import { maybeZodErrorMessage } from "lib/error";
+import { generateId } from "lib/id";
+import { z } from "zod";
 
-export abstract class BaseService {
+interface EventProvider<Event> {
+  next: () => Promise<Event>;
+}
+
+class EventMultiplexer<Event> implements EventProvider<Event> {
+  private readonly providers: Map<string, EventProvider<Event>>;
+  private readonly promises: Map<string, Promise<void>>;
+  private readonly queue: Event[] = [];
+
+  constructor() {
+    this.providers = new Map();
+    this.promises = new Map();
+  }
+
+  register(provider: EventProvider<Event>): void {
+    let id = generateId(8).toString();
+    while (this.providers.has(id)) {
+      id = generateId(8).toString();
+    }
+    this.providers.set(id, provider);
+  }
+
+  async next(): Promise<Event> {
+    for (const [id, provider] of this.providers) {
+      if (!this.promises.has(id)) {
+        this.promises.set(
+          id,
+          (async () => {
+            const event = await provider.next();
+            this.promises.delete(id);
+            this.queue.push(event);
+          })()
+        );
+      }
+    }
+
+    if (this.queue.length === 0) {
+      const promises = Array.from(this.promises.values());
+      await Promise.any(promises);
+    }
+    return this.queue.shift() as Event;
+  }
+}
+
+export const BaseEvent = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("timer"),
+  }),
+  z.object({
+    type: z.literal("request"),
+    request: Request,
+  }),
+]);
+export type BaseEvent = z.infer<typeof BaseEvent>;
+
+class RequestEventProvider implements EventProvider<BaseEvent> {
+  private buffer: object[] = [];
+
+  constructor(private readonly log: Log, private readonly port: ServerPort) {}
+
+  next: () => Promise<BaseEvent> = async () => {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, no-constant-condition
+    while (true) {
+      this.buffer = this.buffer.concat(this.port.drain());
+      const raw =
+        this.buffer.shift() ?? (await this.port.read({ timeout: Infinity }));
+      if (raw === null) {
+        continue;
+      }
+      const maybeRequest = Request.safeParse(raw);
+      if (!maybeRequest.success) {
+        const error = fromZodError(maybeRequest.error);
+        this.log.error("invalid-request", { error, raw });
+        continue;
+      }
+      return {
+        type: "request",
+        request: maybeRequest.data,
+      };
+    }
+  };
+}
+
+interface TimerEvent {
+  type: "timer";
+}
+const TIMER_EVENT: TimerEvent = { type: "timer" };
+
+class TimerEventProvider
+  extends TimerManager
+  implements EventProvider<BaseEvent>
+{
+  private state!: {
+    promise: Promise<TimerEvent>;
+    resolve: (value: TimerEvent) => void;
+    isResolved: boolean;
+  };
+
+  constructor(private readonly ns: NS) {
+    super();
+    this.state = {
+      promise: Promise.resolve(TIMER_EVENT),
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      resolve: () => {},
+      isResolved: true,
+    };
+  }
+
+  setInterval(callback: () => void | Promise<void>, ms: number): void {
+    super.setInterval(callback, ms);
+    // Force a refresh of the promise
+    this.doResolve();
+  }
+
+  setTimeout(callback: () => void | Promise<void>, ms: number): () => void {
+    const clear = super.setTimeout(callback, ms);
+    // Force a refresh of the promise
+    this.doResolve();
+    return clear;
+  }
+
+  private newState() {
+    let resolve: (value: TimerEvent) => void;
+    const promise = new Promise<TimerEvent>((r) => {
+      resolve = r;
+    });
+    this.state = {
+      promise,
+      // @ts-expect-error It's not actually undefined, it's assigned in the Promise constructor above
+      resolve,
+      isResolved: false,
+    };
+  }
+
+  private doResolve() {
+    if (!this.state.isResolved) {
+      this.state.isResolved = true;
+      this.state.resolve({ ...TIMER_EVENT });
+    }
+  }
+
+  next: () => Promise<BaseEvent> = () => {
+    this.newState();
+    const time = this.getTimeUntilNextEvent();
+    if (time === Infinity) {
+      return this.state.promise;
+    }
+    return Promise.any([
+      this.state.promise,
+      this.ns.asleep(time).then(() => {
+        return TIMER_EVENT;
+      }),
+    ]);
+  };
+}
+
+export abstract class BaseService<Event = BaseEvent> {
   readonly clearPortOnListen: boolean = true;
   private lastYield = Date.now();
   protected readonly log: Log;
   protected readonly listenPort: ServerPort;
   protected readonly fmt: Fmt;
-  protected readonly timers = new TimerManager();
+  protected readonly timers;
+  protected readonly eventMultiplexer = new EventMultiplexer<
+    Event & BaseEvent
+  >();
 
   constructor(protected readonly ns: NS) {
     this.log = new Log(ns, this.constructor.name);
     this.fmt = new Fmt(ns);
+    this.timers = new TimerEventProvider(ns);
     this.registerTimers(this.timers);
     this.listenPort = new ServerPort(ns, this.getPortNumber());
+
+    this.eventMultiplexer.register(this.timers);
+    this.eventMultiplexer.register(
+      new RequestEventProvider(this.log, this.listenPort)
+    );
   }
 
   abstract getPortNumber(): number;
@@ -50,13 +217,6 @@ export abstract class BaseService {
       this.listenPort.clear();
     }
   };
-
-  private nextRequest = async (buffer: unknown[]) =>
-    buffer.shift() ??
-    (await this.listenPort.read({
-      timeout: this.timers.getTimeUntilNextEvent(),
-      throwOnTimeout: false,
-    }));
 
   private async execute(handler: Handler, request: Request): Promise<void> {
     try {
@@ -102,6 +262,7 @@ export abstract class BaseService {
     this.log.debug(
       `${request.responseMeta?.port.toString() ?? "unknown"} => ${
         request.method
+        // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
       }(${request.args.map(highlightJSON).join(", ")})`
     );
 
@@ -154,18 +315,15 @@ export abstract class BaseService {
     await this.setup();
     this.log.info("listening", { port: this.listenPort.portNumber });
 
-    const buffer = [];
     // eslint-disable-next-line no-constant-condition, @typescript-eslint/no-unnecessary-condition
     while (true) {
-      await this.timers.invoke();
-      buffer.push(...this.listenPort.drain());
-
-      const raw = await this.nextRequest(buffer);
-      if (raw !== null) {
-        //this.log.debug("req", { request: raw });
-        await this.handleRequest(raw);
+      const event = await this.eventMultiplexer.next();
+      if (event.type === "timer") {
+        await this.timers.invoke();
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      } else if (event.type === "request") {
+        await this.handleRequest(event.request);
       }
-
       await this.yieldIfNeeded();
     }
   }

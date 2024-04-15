@@ -23,7 +23,7 @@ export class ServerPort {
         timeout === Infinity
           ? this.port.nextWrite()
           : Promise.any([this.port.nextWrite(), this.ns.asleep(timeout)]);
-      if (await promise) {
+      if ((await promise) === true) {
         if (throwOnTimeout) {
           throw new Error(
             `Timeout reading from port ${this.portNumber.toString()}`
