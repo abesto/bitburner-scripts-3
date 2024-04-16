@@ -1,6 +1,6 @@
-import { BaseService } from "rpc/server";
+import { BaseService, RequestEvent, useRequestEvents } from "rpc/server";
 import { z } from "zod";
-import * as PORTS from "rpc/PORTS";
+import { ECHO as PORT } from "rpc/PORTS";
 import { Request, APIImpl, Res } from "rpc/types";
 
 export const API = z.object({
@@ -9,9 +9,20 @@ export const API = z.object({
 });
 export type API = z.infer<typeof API>;
 
-export class EchoService extends BaseService implements APIImpl<API> {
-  getPortNumber() {
-    return PORTS.ECHO;
+export class EchoService
+  extends BaseService<RequestEvent>
+  implements APIImpl<API>
+{
+  override async setup() {
+    useRequestEvents({
+      service: this,
+      portNumber: PORT,
+      clearPort: true,
+      multiplexer: this.eventMultiplexer,
+      ns: this.ns,
+      log: this.log,
+    });
+    return Promise.resolve();
   }
 
   echo = async (req: Request, res: Res) => {

@@ -1,4 +1,12 @@
-import { BaseService } from "rpc/server";
+import {
+  BaseService,
+  EventMultiplexer,
+  RequestEvent,
+  TimerEvent,
+  TimerEventProvider,
+  useRequestEvents,
+  useTimerEvents,
+} from "rpc/server";
 import { REDIS as PORT } from "rpc/PORTS";
 import {
   API,
@@ -13,6 +21,8 @@ import { Stream } from "./stream";
 import { TimerManager } from "lib/TimerManager";
 import { generateId } from "lib/id";
 import { APIImpl, Request, Res } from "rpc/types";
+import { z } from "zod";
+import { ExitCodeServerEvent } from "lib/exitcode";
 
 class XReadSubscriber {
   // eslint-disable-next-line @typescript-eslint/no-empty-function
@@ -165,25 +175,47 @@ class XReadBlockManager {
   }
 }
 
-export class RedisService extends BaseService implements APIImpl<API> {
+const ServerEvent = z.discriminatedUnion("type", [
+  RequestEvent,
+  TimerEvent,
+  ExitCodeServerEvent,
+]);
+type ServerEvent = z.infer<typeof ServerEvent>;
+
+export class RedisService
+  extends BaseService<ServerEvent>
+  implements APIImpl<API>
+{
   private readonly xreadBlockManager: XReadBlockManager;
+  private readonly timers: TimerEventProvider;
 
   constructor(
     ns: NS,
     private readonly storage: IRedisStorage = new CachedRedisStorage(ns)
   ) {
     super(ns);
+    this.timers = new TimerEventProvider(ns);
     this.xreadBlockManager = new XReadBlockManager(this.timers);
   }
 
-  override getPortNumber() {
-    return PORT;
-  }
+  override setup() {
+    useTimerEvents(
+      this.eventMultiplexer as EventMultiplexer<TimerEvent>,
+      this.timers
+    );
+    useRequestEvents({
+      service: this,
+      portNumber: PORT,
+      clearPort: true,
+      multiplexer: this.eventMultiplexer as EventMultiplexer<RequestEvent>,
+      ns: this.ns,
+      log: this.log,
+    });
 
-  protected override registerTimers(timers: TimerManager): void {
-    timers.setInterval(() => {
+    this.timers.setInterval(() => {
       this.storage.persist();
     }, 1000);
+    return Promise.resolve();
   }
 
   get = async (req: Request, res: Res) => {

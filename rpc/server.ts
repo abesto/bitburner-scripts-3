@@ -15,21 +15,54 @@ import { maybeZodErrorMessage } from "lib/error";
 import { generateId } from "lib/id";
 import { z } from "zod";
 
-interface EventProvider<Event> {
+export interface EventProvider<Event> {
   next: () => Promise<Event>;
 }
 
-class EventMultiplexer<Event> implements EventProvider<Event> {
+type TypesOf<U> = U extends { type: infer T } ? T : never;
+type Variant<U, T> = U extends { type: T } ? U : never;
+
+class EventHandlerMap<Event extends { type: unknown }> {
+  private readonly handlers = new Map<
+    TypesOf<Event>,
+    ((event: Event) => Promise<void> | void)[]
+  >();
+
+  registerHandler<T extends TypesOf<Event>>(
+    eventType: T,
+    handler: (event: Variant<Event, T>) => Promise<void> | void
+  ) {
+    if (!this.handlers.has(eventType)) {
+      this.handlers.set(eventType, []);
+    }
+    // @ts-expect-error We cheat. Unfortunately.
+    this.handlers.get(eventType)?.push(handler);
+  }
+
+  async handle(event: Event) {
+    // @ts-expect-error We cheat. Unfortunately.
+    const handlers = this.handlers.get(event.type);
+    if (handlers === undefined) {
+      return;
+    }
+    for (const handler of handlers) {
+      await handler(event);
+    }
+  }
+}
+
+export class EventMultiplexer<Event extends { type: unknown }> {
   private readonly providers: Map<string, EventProvider<Event>>;
   private readonly promises: Map<string, Promise<void>>;
   private readonly queue: Event[] = [];
+  private readonly handlers = new EventHandlerMap<Event>();
 
   constructor() {
     this.providers = new Map();
     this.promises = new Map();
   }
 
-  register(provider: EventProvider<Event>): void {
+  registerProvider(provider: EventProvider<Event>): void {
     let id = generateId(8).toString();
     while (this.providers.has(id)) {
       id = generateId(8).toString();
@@ -37,7 +70,14 @@ class EventMultiplexer<Event> implements EventProvider<Event> {
     this.providers.set(id, provider);
   }
 
-  async next(): Promise<Event> {
+  registerHandler<T extends TypesOf<Event>>(
+    eventType: T,
+    handler: (event: Variant<Event, T>) => void | Promise<void>
+  ): void {
+    this.handlers.registerHandler(eventType, handler);
+  }
+
+  async handleNext(): Promise<void> {
     for (const [id, provider] of this.providers) {
       if (!this.promises.has(id)) {
         this.promises.set(
@@ -55,27 +95,30 @@ class EventMultiplexer<Event> implements EventProvider<Event> {
       const promises = Array.from(this.promises.values());
       await Promise.any(promises);
     }
-    return this.queue.shift() as Event;
+
+    const event = this.queue.shift() as Event;
+    await this.handlers.handle(event);
   }
 }
 
-export const BaseEvent = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("timer"),
-  }),
-  z.object({
-    type: z.literal("request"),
-    request: Request,
-  }),
-]);
-export type BaseEvent = z.infer<typeof BaseEvent>;
+export const TimerEvent = z.object({
+  type: z.literal("timer"),
+});
+export type TimerEvent = z.infer<typeof TimerEvent>;
+const TIMER_EVENT: TimerEvent = { type: "timer" };
 
-class RequestEventProvider implements EventProvider<BaseEvent> {
+export const RequestEvent = z.object({
+  type: z.literal("request"),
+  request: Request,
+});
+export type RequestEvent = z.infer<typeof RequestEvent>;
+
+class RequestEventProvider implements EventProvider<RequestEvent> {
   private buffer: object[] = [];
 
   constructor(private readonly log: Log, private readonly port: ServerPort) {}
 
-  next: () => Promise<BaseEvent> = async () => {
+  next: () => Promise<RequestEvent> = async () => {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, no-constant-condition
     while (true) {
       this.buffer = this.buffer.concat(this.port.drain());
@@ -98,14 +141,9 @@ class RequestEventProvider implements EventProvider<BaseEvent> {
   };
 }
 
-interface TimerEvent {
-  type: "timer";
-}
-const TIMER_EVENT: TimerEvent = { type: "timer" };
-
-class TimerEventProvider
+export class TimerEventProvider
   extends TimerManager
-  implements EventProvider<BaseEvent>
+  implements EventProvider<TimerEvent>
 {
   private state!: {
     promise: Promise<TimerEvent>;
@@ -156,7 +194,7 @@ class TimerEventProvider
     }
   }
 
-  next: () => Promise<BaseEvent> = () => {
+  next: () => Promise<TimerEvent> = () => {
     this.newState();
     const time = this.getTimeUntilNextEvent();
     if (time === Infinity) {
@@ -171,52 +209,22 @@ class TimerEventProvider
   };
 }
 
-export abstract class BaseService<Event = BaseEvent> {
-  readonly clearPortOnListen: boolean = true;
-  private lastYield = Date.now();
-  protected readonly log: Log;
-  protected readonly listenPort: ServerPort;
-  protected readonly fmt: Fmt;
-  protected readonly timers;
-  protected readonly eventMultiplexer = new EventMultiplexer<
-    Event & BaseEvent
-  >();
+export const useTimerEvents = (
+  multiplexer: EventMultiplexer<TimerEvent>,
+  timers: TimerEventProvider
+) => {
+  multiplexer.registerProvider(timers);
+  multiplexer.registerHandler("timer", async () => {
+    await timers.invoke();
+  });
+};
 
-  constructor(protected readonly ns: NS) {
-    this.log = new Log(ns, this.constructor.name);
-    this.fmt = new Fmt(ns);
-    this.timers = new TimerEventProvider(ns);
-    this.registerTimers(this.timers);
-    this.listenPort = new ServerPort(ns, this.getPortNumber());
-
-    this.eventMultiplexer.register(this.timers);
-    this.eventMultiplexer.register(
-      new RequestEventProvider(this.log, this.listenPort)
-    );
-  }
-
-  abstract getPortNumber(): number;
-
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  protected registerTimers(timers: TimerManager): void {
-    // Override to register timers at construction time
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-empty-function
-  protected async setup(): Promise<void> {
-    // Override to run code just before starting to serve requests
-  }
-
-  protected maxTimeSlice(): number {
-    return 100;
-  }
-
-  private clearPortIfNeeded = () => {
-    if (this.clearPortOnListen) {
-      this.ns.print(`Clearing port ${this.listenPort.portNumber.toString()}`);
-      this.listenPort.clear();
-    }
-  };
+class RequestHandler {
+  constructor(
+    private readonly ns: NS,
+    private readonly log: Log,
+    private readonly service: object
+  ) {}
 
   private async execute(handler: Handler, request: Request): Promise<void> {
     try {
@@ -235,7 +243,7 @@ export abstract class BaseService<Event = BaseEvent> {
     }
   }
 
-  private handleRequest = async (raw: unknown) => {
+  handleRequest = async (raw: unknown) => {
     const maybeRequest = Request.safeParse(raw);
     if (!maybeRequest.success) {
       const error = fromZodError(maybeRequest.error);
@@ -244,7 +252,7 @@ export abstract class BaseService<Event = BaseEvent> {
     }
 
     const request = maybeRequest.data;
-    const handler = Reflect.get(this, request.method) as Handler;
+    const handler = Reflect.get(this.service, request.method) as Handler;
     if (typeof handler !== "function") {
       this.log.error("method-not-found", { request });
       if (request.responseMeta !== undefined) {
@@ -302,6 +310,49 @@ export abstract class BaseService<Event = BaseEvent> {
       errorResponse(request.responseMeta.msgId, error)
     );
   }
+}
+
+export const useRequestEvents = (opts: {
+  service: object;
+  portNumber: number;
+  clearPort: boolean;
+  multiplexer: EventMultiplexer<RequestEvent>;
+  ns: NS;
+  log: Log;
+}) => {
+  const port = new ServerPort(opts.ns, opts.portNumber);
+  if (opts.clearPort) {
+    opts.log.info("clearing port", { port: opts.portNumber });
+    port.clear();
+  }
+
+  opts.multiplexer.registerProvider(new RequestEventProvider(opts.log, port));
+
+  const handler = new RequestHandler(opts.ns, opts.log, opts.service);
+  opts.multiplexer.registerHandler("request", (event) =>
+    handler.handleRequest(event.request)
+  );
+};
+
+export abstract class BaseService<Event extends { type: unknown }> {
+  readonly clearPortOnListen: boolean = true;
+  private lastYield = Date.now();
+  protected readonly log: Log;
+  protected readonly fmt: Fmt;
+  protected readonly eventMultiplexer = new EventMultiplexer<Event>();
+
+  constructor(protected readonly ns: NS) {
+    this.log = new Log(ns, this.constructor.name);
+    this.fmt = new Fmt(ns);
+  }
+
+  protected async setup(): Promise<void> {
+    // Override to run code just before starting to serve requests
+  }
+
+  protected maxTimeSlice(): number {
+    return 100;
+  }
 
   private async yieldIfNeeded(): Promise<void> {
     if (Date.now() - this.lastYield > this.maxTimeSlice()) {
@@ -310,20 +361,12 @@ export abstract class BaseService<Event = BaseEvent> {
     }
   }
 
-  async listen(): Promise<void> {
-    this.clearPortIfNeeded();
+  async run(): Promise<void> {
     await this.setup();
-    this.log.info("listening", { port: this.listenPort.portNumber });
 
     // eslint-disable-next-line no-constant-condition, @typescript-eslint/no-unnecessary-condition
     while (true) {
-      const event = await this.eventMultiplexer.next();
-      if (event.type === "timer") {
-        await this.timers.invoke();
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      } else if (event.type === "request") {
-        await this.handleRequest(event.request);
-      }
+      await this.eventMultiplexer.handleNext();
       await this.yieldIfNeeded();
     }
   }

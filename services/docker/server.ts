@@ -1,4 +1,12 @@
-import { BaseService } from "rpc/server";
+import {
+  BaseService,
+  EventMultiplexer,
+  RequestEvent,
+  TimerEvent,
+  TimerEventProvider,
+  useRequestEvents,
+  useTimerEvents,
+} from "rpc/server";
 import { DOCKER as PORT } from "rpc/PORTS";
 import { RedisClient, redisClient } from "services/redis/client";
 import { allocateThreads, calculateHostCandidates } from "./algorithms";
@@ -11,8 +19,9 @@ import {
   SwarmCapacityEntry,
   Task,
 } from "./types";
-import { TimerManager } from "lib/TimerManager";
 import { APIImpl, Request, Res } from "rpc/types";
+import { ExitCodeServerEvent } from "lib/exitcode";
+import { z } from "zod";
 
 const REDIS_KEYS = {
   NODES: "docker:swarm:nodes",
@@ -27,24 +36,42 @@ const REDIS_KEYS = {
 
 const ID_BYTES = 8;
 
-export class DockerService extends BaseService implements APIImpl<API> {
+const ServerEvent = z.discriminatedUnion("type", [
+  RequestEvent,
+  TimerEvent,
+  ExitCodeServerEvent,
+]);
+type ServerEvent = z.infer<typeof ServerEvent>;
+
+export class DockerService
+  extends BaseService<ServerEvent>
+  implements APIImpl<API>
+{
   private readonly redis: RedisClient;
+  private readonly timers: TimerEventProvider;
 
   constructor(ns: NS) {
     super(ns);
     this.redis = redisClient(ns);
-  }
-
-  override getPortNumber() {
-    return PORT;
+    this.timers = new TimerEventProvider(ns);
   }
 
   override async setup() {
     await this.redis.sadd(REDIS_KEYS.NODES, [this.ns.getHostname()]);
-  }
+    this.timers.setInterval(() => this.keepalive(), 10000);
 
-  protected override registerTimers(timers: TimerManager) {
-    timers.setInterval(() => this.keepalive(), 10000);
+    useTimerEvents(
+      this.eventMultiplexer as EventMultiplexer<TimerEvent>,
+      this.timers
+    );
+    useRequestEvents({
+      service: this,
+      portNumber: PORT,
+      clearPort: true,
+      multiplexer: this.eventMultiplexer as EventMultiplexer<RequestEvent>,
+      ns: this.ns,
+      log: this.log,
+    });
   }
 
   async keepalive() {

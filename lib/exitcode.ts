@@ -1,3 +1,4 @@
+import { EventProvider } from "rpc/server";
 import { RedisClient, redisClient } from "services/redis/client";
 import { RawStream } from "services/redis/types";
 import { z } from "zod";
@@ -68,4 +69,30 @@ export class ExitCodeSubscriber {
       )
     );
   }
+}
+
+export const ExitCodeServerEvent = z.object({
+  type: z.literal("exitcode"),
+  pid: z.number(),
+  success: z.boolean(),
+});
+export type ExitCodeServerEvent = z.infer<typeof ExitCodeServerEvent>;
+
+export class ExitCodeEventProvider
+  implements EventProvider<ExitCodeServerEvent>
+{
+  private subscriber: ExitCodeSubscriber;
+  private queue: ExitCodeEvent[] = [];
+
+  constructor(ns: NS) {
+    this.subscriber = new ExitCodeSubscriber(ns);
+  }
+
+  next: () => Promise<ExitCodeServerEvent> = async () => {
+    while (this.queue.length === 0) {
+      this.queue = this.queue.concat(await this.subscriber.poll(1000 * 60));
+    }
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    return { type: "exitcode", ...this.queue.shift()! };
+  };
 }
