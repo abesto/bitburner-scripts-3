@@ -2,10 +2,7 @@ import {
   BaseService,
   EventMultiplexer,
   RequestEvent,
-  TimerEvent,
-  TimerEventProvider,
   useRequestEvents,
-  useTimerEvents,
 } from "rpc/server";
 import { DOCKER as PORT } from "rpc/PORTS";
 import { RedisClient, redisClient } from "services/redis/client";
@@ -22,6 +19,11 @@ import {
 import { APIImpl, Request, Res } from "rpc/types";
 import { ExitCodeServerEvent } from "lib/exitcode";
 import { z } from "zod";
+import {
+  TimerEvent,
+  TimerEventProvider,
+  useTimerEvents,
+} from "lib/TimerManager";
 
 const REDIS_KEYS = {
   NODES: "docker:swarm:nodes",
@@ -53,16 +55,9 @@ export class DockerService
   constructor(ns: NS) {
     super(ns);
     this.redis = redisClient(ns);
-    this.timers = new TimerEventProvider(ns);
-  }
-
-  override async setup() {
-    await this.redis.sadd(REDIS_KEYS.NODES, [this.ns.getHostname()]);
-    this.timers.setInterval(() => this.keepalive(), 10000);
-
-    useTimerEvents(
-      this.eventMultiplexer as EventMultiplexer<TimerEvent>,
-      this.timers
+    this.timers = useTimerEvents(
+      ns,
+      this.eventMultiplexer as EventMultiplexer<TimerEvent>
     );
     useRequestEvents({
       service: this,
@@ -72,6 +67,11 @@ export class DockerService
       ns: this.ns,
       log: this.log,
     });
+  }
+
+  override async setup() {
+    await this.redis.sadd(REDIS_KEYS.NODES, [this.ns.getHostname()]);
+    this.timers.setInterval(() => this.keepalive(), 10000);
   }
 
   async keepalive() {

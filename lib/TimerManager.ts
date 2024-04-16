@@ -1,4 +1,6 @@
+import { z } from "zod";
 import { generateId } from "./id";
+import { EventMultiplexer, EventProvider } from "rpc/server";
 
 interface Interval {
   lastRun: number;
@@ -64,3 +66,89 @@ export class TimerManager {
     }
   }
 }
+
+export const TimerEvent = z.object({
+  type: z.literal("timer"),
+});
+export type TimerEvent = z.infer<typeof TimerEvent>;
+const TIMER_EVENT: TimerEvent = { type: "timer" };
+
+export class TimerEventProvider
+  extends TimerManager
+  implements EventProvider<TimerEvent>
+{
+  private state!: {
+    promise: Promise<TimerEvent>;
+    resolve: (value: TimerEvent) => void;
+    isResolved: boolean;
+  };
+
+  constructor(private readonly ns: NS) {
+    super();
+    this.state = {
+      promise: Promise.resolve(TIMER_EVENT),
+      // eslint-disable-next-line @typescript-eslint/no-empty-function
+      resolve: () => {},
+      isResolved: true,
+    };
+  }
+
+  setInterval(callback: () => void | Promise<void>, ms: number): void {
+    super.setInterval(callback, ms);
+    // Force a refresh of the promise
+    this.doResolve();
+  }
+
+  setTimeout(callback: () => void | Promise<void>, ms: number): () => void {
+    const clear = super.setTimeout(callback, ms);
+    // Force a refresh of the promise
+    this.doResolve();
+    return clear;
+  }
+
+  private newState() {
+    let resolve: (value: TimerEvent) => void;
+    const promise = new Promise<TimerEvent>((r) => {
+      resolve = r;
+    });
+    this.state = {
+      promise,
+      // @ts-expect-error It's not actually undefined, it's assigned in the Promise constructor above
+      resolve,
+      isResolved: false,
+    };
+  }
+
+  private doResolve() {
+    if (!this.state.isResolved) {
+      this.state.isResolved = true;
+      this.state.resolve({ ...TIMER_EVENT });
+    }
+  }
+
+  next: () => Promise<TimerEvent> = () => {
+    this.newState();
+    const time = this.getTimeUntilNextEvent();
+    if (time === Infinity) {
+      return this.state.promise;
+    }
+    return Promise.any([
+      this.state.promise,
+      this.ns.asleep(time).then(() => {
+        return TIMER_EVENT;
+      }),
+    ]);
+  };
+}
+
+export const useTimerEvents = (
+  ns: NS,
+  multiplexer: EventMultiplexer<TimerEvent>
+) => {
+  const timers = new TimerEventProvider(ns);
+  multiplexer.registerProvider(timers);
+  multiplexer.registerHandler("timer", async () => {
+    await timers.invoke();
+  });
+  return timers;
+};

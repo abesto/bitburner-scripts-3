@@ -2,10 +2,7 @@ import {
   BaseService,
   EventMultiplexer,
   RequestEvent,
-  TimerEvent,
-  TimerEventProvider,
   useRequestEvents,
-  useTimerEvents,
 } from "rpc/server";
 import { REDIS as PORT } from "rpc/PORTS";
 import {
@@ -18,7 +15,12 @@ import {
 import { Minimatch } from "minimatch";
 import { CachedRedisStorage, IRedisStorage, TYPE_NAMES } from "./storage";
 import { Stream } from "./stream";
-import { TimerManager } from "lib/TimerManager";
+import {
+  TimerEvent,
+  TimerEventProvider,
+  TimerManager,
+  useTimerEvents,
+} from "lib/TimerManager";
 import { generateId } from "lib/id";
 import { APIImpl, Request, Res } from "rpc/types";
 import { z } from "zod";
@@ -194,14 +196,9 @@ export class RedisService
     private readonly storage: IRedisStorage = new CachedRedisStorage(ns)
   ) {
     super(ns);
-    this.timers = new TimerEventProvider(ns);
-    this.xreadBlockManager = new XReadBlockManager(this.timers);
-  }
-
-  override setup() {
-    useTimerEvents(
-      this.eventMultiplexer as EventMultiplexer<TimerEvent>,
-      this.timers
+    this.timers = useTimerEvents(
+      ns,
+      this.eventMultiplexer as EventMultiplexer<TimerEvent>
     );
     useRequestEvents({
       service: this,
@@ -211,7 +208,10 @@ export class RedisService
       ns: this.ns,
       log: this.log,
     });
+    this.xreadBlockManager = new XReadBlockManager(this.timers);
+  }
 
+  override setup() {
     this.timers.setInterval(() => {
       this.storage.persist();
     }, 1000);
