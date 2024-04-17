@@ -56,7 +56,7 @@ export class EventMultiplexer<Event extends { type: unknown }> {
   private readonly queue: Event[] = [];
   private readonly handlers = new EventHandlerMap<Event>();
 
-  constructor() {
+  constructor(private readonly log: Log) {
     this.providers = new Map();
     this.promises = new Map();
   }
@@ -76,7 +76,7 @@ export class EventMultiplexer<Event extends { type: unknown }> {
     this.handlers.registerHandler(eventType, handler);
   }
 
-  async handleNext(): Promise<void> {
+  async handleNext() {
     for (const [id, provider] of this.providers) {
       if (!this.promises.has(id)) {
         this.promises.set(
@@ -92,11 +92,17 @@ export class EventMultiplexer<Event extends { type: unknown }> {
 
     if (this.queue.length === 0) {
       const promises = Array.from(this.promises.values());
-      await Promise.any(promises);
+      try {
+        await Promise.any(promises);
+      } catch (error) {
+        this.log.error("event-provider-error", { error });
+      }
     }
 
-    const event = this.queue.shift() as Event;
-    await this.handlers.handle(event);
+    const event = this.queue.shift();
+    if (event !== undefined) {
+      await this.handlers.handle(event);
+    }
   }
 }
 
@@ -108,6 +114,7 @@ export type RequestEvent = z.infer<typeof RequestEvent>;
 
 class RequestEventProvider implements EventProvider<RequestEvent> {
   private buffer: object[] = [];
+  private exit = false;
 
   constructor(private readonly log: Log, private readonly port: ServerPort) {}
 
@@ -247,6 +254,10 @@ export const useRequestEvents = (opts: {
   opts.multiplexer.registerHandler("request", (event) =>
     handler.handleRequest(event.request)
   );
+
+  opts.ns.atExit(() => {
+    opts.ns.writePort(opts.portNumber, "poisonpill, yo");
+  });
 };
 
 export abstract class BaseService<Event extends { type: unknown }> {
@@ -254,15 +265,16 @@ export abstract class BaseService<Event extends { type: unknown }> {
   private lastYield = Date.now();
   protected readonly log: Log;
   protected readonly fmt: Fmt;
-  protected readonly eventMultiplexer = new EventMultiplexer<Event>();
+  protected readonly eventMultiplexer: EventMultiplexer<Event>;
 
   constructor(protected readonly ns: NS) {
     this.log = new Log(ns, this.constructor.name);
     this.fmt = new Fmt(ns);
+    this.eventMultiplexer = new EventMultiplexer(this.log);
   }
 
   protected async setup(): Promise<void> {
-    // Override to run code just before starting to serve requests
+    // Override to run code just before starting to handle events
   }
 
   protected maxTimeSlice(): number {
@@ -279,10 +291,14 @@ export abstract class BaseService<Event extends { type: unknown }> {
   async run(): Promise<void> {
     await this.setup();
 
-    // eslint-disable-next-line no-constant-condition, @typescript-eslint/no-unnecessary-condition
-    while (true) {
-      await this.eventMultiplexer.handleNext();
-      await this.yieldIfNeeded();
+    try {
+      // eslint-disable-next-line no-constant-condition, @typescript-eslint/no-unnecessary-condition
+      while (true) {
+        await this.eventMultiplexer.handleNext();
+        await this.yieldIfNeeded();
+      }
+    } catch (error) {
+      this.log.error("run-error", { error });
     }
   }
 }

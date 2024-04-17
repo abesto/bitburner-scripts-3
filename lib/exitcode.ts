@@ -35,10 +35,10 @@ export const withExitCode =
   async (ns: NS): Promise<R> => {
     try {
       const result = await fn(ns);
-      await submitExitCode(ns, true);
+      ns.atExit(() => void submitExitCode(ns, true));
       return result;
     } catch (error) {
-      await submitExitCode(ns, false);
+      ns.atExit(() => void submitExitCode(ns, false));
       throw error;
     }
   };
