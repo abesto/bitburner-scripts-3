@@ -15,6 +15,7 @@ interface CreateOptions {
   ["restart-condition"]: string;
   constraint: string[];
   mode: string;
+  ["limit-memory"]?: number;
 }
 
 export const builder = (
@@ -63,6 +64,10 @@ export const builder = (
         default: "replicated",
         choices: ["replicated", "replicated-job"],
       },
+      "limit-memory": {
+        type: "number",
+        describe: "Per thread memory limit in GBs (example: 1.75)",
+      },
     });
 
 export const handler = async (
@@ -79,6 +84,7 @@ export const handler = async (
     restartCondition,
     mode,
     constraint: constraints,
+    limitMemory,
   } = argv;
 
   const docker = dockerClient(ns);
@@ -108,6 +114,9 @@ export const handler = async (
       },
       placement: {
         constraints,
+      },
+      resources: {
+        memoryGigabytes: limitMemory,
       },
     },
     mode: modeSpec,

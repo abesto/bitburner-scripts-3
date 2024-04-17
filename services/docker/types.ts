@@ -35,6 +35,11 @@ export const TaskSpec = z.object({
     command: z.string(),
     args: z.string().array(),
   }),
+  resources: z
+    .object({
+      memoryGigabytes: z.number().optional(), // per thread; goes into ns.exec RunOptions
+    })
+    .optional(),
   restartPolicy: z.object({
     condition: z.enum(["none", "on-failure", "any"]),
     delay: z.number(),

@@ -24,6 +24,7 @@ import {
   TimerEventProvider,
   useTimerEvents,
 } from "lib/TimerManager";
+import { RunOptions } from "NetscriptDefinitions";
 
 const REDIS_KEYS = {
   NODES: "docker:swarm:nodes",
@@ -167,7 +168,9 @@ export class DockerService
     }
 
     const script = service.spec.taskTemplate.containerSpec.command;
-    const scriptRam = this.ns.getScriptRam(script);
+    const scriptRam =
+      service.spec.taskTemplate.resources?.memoryGigabytes ??
+      this.ns.getScriptRam(script);
     const capacity = await this.getSwarmCapacity();
     const hostnames = service.spec.taskTemplate.placement.constraints
       .map((s) => PlacementConstraint.parse(s))
@@ -219,10 +222,13 @@ export class DockerService
       while (await this.redis.exists([REDIS_KEYS.TASK(service.id, taskId)])) {
         taskId = generateId(ID_BYTES);
       }
-      const execArgs: [string, string, number, ...string[]] = [
+      const execArgs: [string, string, RunOptions, ...string[]] = [
         script,
         host,
-        threads,
+        {
+          threads,
+          ramOverride: scriptRam,
+        },
         ...service.spec.taskTemplate.containerSpec.args,
       ];
       const pid = this.ns.exec(...execArgs);
