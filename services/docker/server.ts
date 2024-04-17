@@ -25,6 +25,7 @@ import {
   useTimerEvents,
 } from "lib/TimerManager";
 import { RunOptions } from "NetscriptDefinitions";
+import { maybeZodErrorMessage } from "lib/error";
 
 const REDIS_KEYS = {
   NODES: "docker:swarm:nodes",
@@ -86,29 +87,39 @@ export class DockerService
     const deadTasks = [];
 
     for (const service of services) {
-      const tasks = await this.lookupTasks(service.id);
+      try {
+        const tasks = await this.lookupTasks(service.id);
 
-      for (const task of tasks) {
-        if (!this.ns.getRunningScript(task.pid)) {
-          this.log.twarn("task", {
-            service: service.spec.name,
-            task: task.name || task.id,
-            result: "crashed",
-          });
-          deadTasks.push(task.id);
+        for (const task of tasks) {
+          if (task.status.status !== "running") {
+            continue;
+          }
+          if (!this.ns.getRunningScript(task.pid)) {
+            this.log.twarn("task", {
+              service: service.spec.name,
+              task: task.name || task.id,
+              result: "crashed",
+            });
+            deadTasks.push(task.id);
+          }
         }
-      }
 
-      if (deadTasks.length > 0) {
-        await this.redis.srem(
-          REDIS_KEYS.TASKS(service.id),
-          deadTasks as [string, ...string[]]
-        );
-        await this.redis.del(deadTasks as [string, ...string[]]);
-      }
+        if (deadTasks.length > 0) {
+          await this.redis.srem(
+            REDIS_KEYS.TASKS(service.id),
+            deadTasks as [string, ...string[]]
+          );
+          await this.redis.del(deadTasks as [string, ...string[]]);
+        }
 
-      await this.scaleDown(service);
-      await this.scaleUp(service);
+        await this.scaleDown(service);
+        await this.scaleUp(service);
+      } catch (error) {
+        this.log.error("keepalive", {
+          service: service.spec.name,
+          error: maybeZodErrorMessage(error),
+        });
+      }
     }
   }
 
@@ -207,9 +218,11 @@ export class DockerService
       0
     );
     if (allocated !== threads) {
-      throw new Error(
-        `failed to allocate all threads. wanted=${threads.toString()} got=${allocated.toString()}`
-      );
+      if (service.spec.labels["allocator.allow-partial"] !== "true") {
+        throw new Error(
+          `failed to allocate all threads. wanted=${threads.toString()} got=${allocated.toString()}`
+        );
+      }
     }
 
     const tasks: Task[] = [];

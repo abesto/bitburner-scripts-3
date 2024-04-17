@@ -2,6 +2,7 @@ import { CliContext } from "lib/cli";
 import { dockerClient } from "services/docker/client";
 import { ServiceMode, ServiceSpec } from "services/docker/types";
 import { ArgumentsCamelCase, Argv } from "yargs";
+import { z } from "zod";
 
 export const command = "create <script> [args..]";
 export const describe = "Create a new service";
@@ -14,6 +15,7 @@ interface CreateOptions {
   ["max-concurrent"]?: number;
   ["restart-condition"]: string;
   constraint: string[];
+  label: string[];
   mode: string;
   ["limit-memory"]?: number;
 }
@@ -59,6 +61,11 @@ export const builder = (
         array: true,
         default: [],
       },
+      label: {
+        type: "string",
+        array: true,
+        default: [],
+      },
       mode: {
         type: "string",
         default: "replicated",
@@ -84,6 +91,7 @@ export const handler = async (
     restartCondition,
     mode,
     constraint: constraints,
+    label: labels,
     limitMemory,
   } = argv;
 
@@ -100,7 +108,14 @@ export const handler = async (
 
   const serviceSpec: ServiceSpec = {
     name,
-    labels: {},
+    labels: Object.fromEntries(
+      z
+        .string()
+        .transform((s) => s.split("="))
+        .pipe(z.tuple([z.string(), z.string()]))
+        .array()
+        .parse(labels)
+    ),
     taskTemplate: {
       containerSpec: {
         labels: {},

@@ -31,11 +31,12 @@ export const handler = async ({
     "\n" +
       fmt
         .table(
-          ["ID", "NAME", "THREADS", "PID", "HOST", "RAM"],
+          ["ID", "NAME", "THREADS", "STATE", "PID", "HOST", "RAM"],
           ...tasks.map((task) => [
             task.id,
             task.name,
             task.threads.toString(),
+            task.status.status,
             task.pid.toString(),
             task.hostname,
             fmt.memory(task.ram),
