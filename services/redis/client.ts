@@ -1,6 +1,6 @@
 import { rpcClient } from "rpc/client";
 import { REDIS as PORT } from "rpc/PORTS";
-import { API } from "./types";
+import { API, XReadRequest, XReadResponse } from "./types";
 
 export const rawRedisClient = (ns: NS) => rpcClient<API>(ns, PORT);
 
@@ -15,11 +15,6 @@ type BoundDbAPI<T> = {
 export const redisClient = (ns: NS, db = 0) => {
   const inner = rawRedisClient(ns);
 
-  const ext = {
-    select: (newDb: number) => (db = newDb),
-    currentDb: () => db,
-  };
-
   const boundMethods = Object.fromEntries(
     API.keyof().options.map((name) => [
       name,
@@ -29,6 +24,20 @@ export const redisClient = (ns: NS, db = 0) => {
     ])
   );
 
-  return { ...ext, ...boundMethods } as BoundDbAPI<typeof inner> & typeof ext;
+  const ext = {
+    select: (newDb: number) => (db = newDb),
+    currentDb: () => db,
+    xread: (request: XReadRequest): Promise<XReadResponse> => {
+      if (request.block === undefined) {
+        return inner.xread(db, request);
+      } else {
+        return inner.withReadOptions({ timeout: request.block + 5000 }, () =>
+          inner.xread(db, request)
+        );
+      }
+    },
+  };
+
+  return { ...boundMethods, ...ext } as BoundDbAPI<typeof inner> & typeof ext;
 };
 export type RedisClient = ReturnType<typeof redisClient>;

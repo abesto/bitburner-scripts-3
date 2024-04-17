@@ -1,6 +1,6 @@
 import { Log } from "lib/log";
 import { ClientPort } from "./transport/ClientPort";
-import { ServerPort } from "./transport/ServerPort";
+import { ReadOptions, ServerPort } from "./transport/ServerPort";
 import { Response, RpcError } from "./types";
 import { fromZodError } from "zod-validation-error";
 import { highlightJSON } from "lib/fmt";
@@ -40,45 +40,58 @@ export const rpcClient = <T extends object>(ns: NS, portNumber: number) => {
     };
   };
 
-  return new Proxy(
-    {},
-    {
-      get: (_, method: string) => {
-        return async (...args: unknown[]) => {
-          const request = buildRequest(method, args);
-          await port.write(request);
-          //log.debug("req", { request });
+  let readOptions: ReadOptions | undefined = undefined;
 
-          const raw = await responsePort.read();
-          const maybeResponse = Response.safeParse(raw);
-          if (!maybeResponse.success) {
-            const error = fromZodError(maybeResponse.error);
-            log.error(error.message, { request });
-            throw error;
-          }
-          //log.debug("res", { request, response: maybeResponse.data });
-          log.debug(
-            `${method}(${args
-              .map(highlightJSON)
-              .join(", ")}) => ${highlightJSON(
-              maybeResponse.data.status === "success"
-                ? maybeResponse.data.result
-                : maybeResponse.data.error
-            )}`
-          );
+  const ext = {
+    withReadOptions: async <T>(options: ReadOptions, fn: () => Promise<T>) => {
+      const oldOptions = readOptions;
+      readOptions = options;
+      try {
+        return await fn();
+      } finally {
+        readOptions = oldOptions;
+      }
+    },
+  };
 
-          const data = maybeResponse.data;
-          if (data.status === "error") {
-            log.error("rpc-error", {
-              method: request.method,
-              error: data.error,
-            });
-            throw new RpcError(data.error);
-          }
+  return new Proxy(ext, {
+    get: (_, method: string) => {
+      if (Reflect.has(ext, method)) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+        return Reflect.get(ext, method);
+      }
+      return async (...args: unknown[]) => {
+        const request = buildRequest(method, args);
+        await port.write(request);
+        //log.debug("req", { request });
 
-          return data.result;
-        };
-      },
-    }
-  ) as RpcClient<T>;
+        const raw = await responsePort.read(readOptions);
+        const maybeResponse = Response.safeParse(raw);
+        if (!maybeResponse.success) {
+          const error = fromZodError(maybeResponse.error);
+          log.error(error.message, { request });
+          throw error;
+        }
+        //log.debug("res", { request, response: maybeResponse.data });
+        log.debug(
+          `${method}(${args.map(highlightJSON).join(", ")}) => ${highlightJSON(
+            maybeResponse.data.status === "success"
+              ? maybeResponse.data.result
+              : maybeResponse.data.error
+          )}`
+        );
+
+        const data = maybeResponse.data;
+        if (data.status === "error") {
+          log.error("rpc-error", {
+            method: request.method,
+            error: data.error,
+          });
+          throw new RpcError(data.error);
+        }
+
+        return data.result;
+      };
+    },
+  }) as RpcClient<T> & typeof ext;
 };

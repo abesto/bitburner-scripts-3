@@ -7,7 +7,7 @@ export const main = async (ns: NS) => {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition, no-constant-condition
   while (true) {
     log.info("polling");
-    const events = await subscriber.poll(4000);
+    const events = await subscriber.poll(60000);
     log.info("poll finished", { events });
     for (const event of events) {
       log.tinfo("exitcode", event);
