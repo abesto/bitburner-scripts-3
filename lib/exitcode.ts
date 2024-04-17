@@ -79,27 +79,28 @@ export class ExitCodeEventProvider
   private subscriber: ExitCodeSubscriber;
   private queue: ExitCodeEvent[] = [];
 
-  constructor(ns: NS) {
+  constructor(ns: NS, private readonly block: number) {
     this.subscriber = new ExitCodeSubscriber(ns);
   }
 
   next: () => Promise<ExitCodeServerEvent> = async () => {
     while (this.queue.length === 0) {
-      this.queue = this.queue.concat(await this.subscriber.poll(1000 * 60));
+      this.queue = this.queue.concat(await this.subscriber.poll(this.block));
     }
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     return { type: "exitcode", ...this.queue.shift()! };
   };
 }
 
-export const useExitCodeEvents = (
-  ns: NS,
-  multiplexer: EventMultiplexer<ExitCodeServerEvent>,
-  handler: (pid: number, success: boolean) => Promise<void> | void
-) => {
-  const provider = new ExitCodeEventProvider(ns);
-  multiplexer.registerProvider(provider);
-  multiplexer.registerHandler("exitcode", async (event) =>
-    handler(event.pid, event.success)
+export const useExitCodeEvents = (opts: {
+  ns: NS;
+  multiplexer: EventMultiplexer<ExitCodeServerEvent>;
+  block: number;
+  handler: (pid: number, success: boolean) => Promise<void> | void;
+}) => {
+  const provider = new ExitCodeEventProvider(opts.ns, opts.block);
+  opts.multiplexer.registerProvider(provider);
+  opts.multiplexer.registerHandler("exitcode", async (event) =>
+    opts.handler(event.pid, event.success)
   );
 };

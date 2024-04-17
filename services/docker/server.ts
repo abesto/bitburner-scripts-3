@@ -69,11 +69,13 @@ export class DockerService
       ns: this.ns,
       log: this.log,
     });
-    useExitCodeEvents(
-      this.ns,
-      this.eventMultiplexer as EventMultiplexer<ExitCodeServerEvent>,
-      this.processExited
-    );
+    useExitCodeEvents({
+      ns: this.ns,
+      multiplexer: this
+        .eventMultiplexer as EventMultiplexer<ExitCodeServerEvent>,
+      block: Infinity,
+      handler: this.processExited,
+    });
   }
 
   override async setup() {
