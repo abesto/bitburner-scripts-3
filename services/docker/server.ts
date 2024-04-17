@@ -26,6 +26,7 @@ import {
 } from "lib/TimerManager";
 import { RunOptions } from "NetscriptDefinitions";
 import { maybeZodErrorMessage } from "lib/error";
+import { LABELS } from "./constants";
 
 const REDIS_KEYS = {
   NODES: "docker:swarm:nodes",
@@ -220,7 +221,7 @@ export class DockerService
       0
     );
     if (allocated !== threads) {
-      if (service.spec.labels["allocator.allow-partial"] !== "true") {
+      if (service.spec.labels[LABELS.ALLOCATOR_ALLOW_PARTIAL] !== "true") {
         throw new Error(
           `failed to allocate all threads. wanted=${threads.toString()} got=${allocated.toString()}`
         );
