@@ -17,7 +17,7 @@ import {
   Task,
 } from "./types";
 import { APIImpl, Request, Res } from "rpc/types";
-import { ExitCodeServerEvent } from "lib/exitcode";
+import { ExitCodeServerEvent, useExitCodeEvents } from "lib/exitcode";
 import { z } from "zod";
 import {
   TimerEvent,
@@ -67,6 +67,11 @@ export class DockerService
       ns: this.ns,
       log: this.log,
     });
+    useExitCodeEvents(
+      this.ns,
+      this.eventMultiplexer as EventMultiplexer<ExitCodeServerEvent>,
+      this.processExited
+    );
   }
 
   override async setup() {
@@ -539,22 +544,21 @@ export class DockerService
     await res.success(API.shape.serviceUpdate.returnType().parse("OK"));
   };
 
-  taskCompleted = async (req: Request, res: Res) => {
-    const [pid] = API.shape.taskCompleted.parameters().parse(req.args);
+  processExited = async (pid: number, success: boolean) => {
     const taskKey = await this.redis.get(REDIS_KEYS.PID_TO_TASK(pid));
     if (taskKey === null) {
-      throw new Error(`task not found: ${pid.toString()}`);
+      return;
     }
     const taskRaw = await this.redis.get(taskKey);
     if (taskRaw === null) {
-      throw new Error(`task not found: ${taskKey}`);
+      this.log.error("task-key-gone", { taskKey });
+      return;
     }
     const task = Task.parse(JSON.parse(taskRaw));
     task.status = {
       timestamp: new Date().toISOString(),
-      status: "complete",
+      status: success ? "complete" : "failed",
     };
     await this.redis.set(taskKey, JSON.stringify(task), {});
-    await res.success(API.shape.taskCompleted.returnType().parse("OK"));
   };
 }

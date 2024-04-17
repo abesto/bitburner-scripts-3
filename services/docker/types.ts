@@ -165,12 +165,5 @@ export const API = z.object({
     .returns(z.literal("OK")),
 
   taskList: z.function().args(TaskListQuery).returns(Task.array()),
-
-  // Other ways of getting "task is finished" to the service are much more complex
-  // to implement well
-  taskCompleted: z
-    .function()
-    .args(z.number().describe("pid"))
-    .returns(z.literal("OK")),
 });
 export type API = z.infer<typeof API>;
