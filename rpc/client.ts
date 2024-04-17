@@ -19,11 +19,13 @@ type PromisifyMethods<T extends object> = {
 };
 export type RpcClient<T extends object> = PromisifyMethods<T>;
 
+let portSequence = 0;
+
 export const rpcClient = <T extends object>(ns: NS, portNumber: number) => {
   const log = new Log(ns, `rpcClient:${portNumber.toString()}`);
   const port = new ClientPort(ns, portNumber);
 
-  const responsePortNumber = ns.pid + 1000;
+  const responsePortNumber = ns.pid + 100000 + portSequence++ * 10000;
   const responsePort = new ServerPort(ns, responsePortNumber);
 
   const buildRequest = (method: string, args: unknown[]) => {

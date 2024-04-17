@@ -1,4 +1,4 @@
-import { EventProvider } from "rpc/server";
+import { EventMultiplexer, EventProvider } from "rpc/server";
 import { RedisClient, redisClient } from "services/redis/client";
 import { RawStream } from "services/redis/types";
 import { z } from "zod";
@@ -33,14 +33,11 @@ export const submitExitCode = async (
 export const withExitCode =
   <R>(fn: (ns: NS) => Promise<R>) =>
   async (ns: NS): Promise<R> => {
-    try {
-      const result = await fn(ns);
-      ns.atExit(() => void submitExitCode(ns, true));
-      return result;
-    } catch (error) {
-      ns.atExit(() => void submitExitCode(ns, false));
-      throw error;
-    }
+    let success = false;
+    ns.atExit(() => void submitExitCode(ns, success));
+    const result = await fn(ns);
+    success = true;
+    return result;
   };
 
 export class ExitCodeSubscriber {
@@ -71,10 +68,8 @@ export class ExitCodeSubscriber {
   }
 }
 
-export const ExitCodeServerEvent = z.object({
+export const ExitCodeServerEvent = ExitCodeEvent.extend({
   type: z.literal("exitcode"),
-  pid: z.number(),
-  success: z.boolean(),
 });
 export type ExitCodeServerEvent = z.infer<typeof ExitCodeServerEvent>;
 
@@ -96,3 +91,15 @@ export class ExitCodeEventProvider
     return { type: "exitcode", ...this.queue.shift()! };
   };
 }
+
+export const useExitCodeEvents = (
+  ns: NS,
+  multiplexer: EventMultiplexer<ExitCodeServerEvent>,
+  handler: (pid: number, success: boolean) => Promise<void> | void
+) => {
+  const provider = new ExitCodeEventProvider(ns);
+  multiplexer.registerProvider(provider);
+  multiplexer.registerHandler("exitcode", async (event) =>
+    handler(event.pid, event.success)
+  );
+};

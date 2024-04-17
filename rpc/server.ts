@@ -96,6 +96,7 @@ export class EventMultiplexer<Event extends { type: unknown }> {
         await Promise.any(promises);
       } catch (error) {
         this.log.error("event-provider-error", { error });
+        console.error("event-provider-error", error);
       }
     }
 
@@ -298,7 +299,8 @@ export abstract class BaseService<Event extends { type: unknown }> {
         await this.yieldIfNeeded();
       }
     } catch (error) {
-      this.log.error("run-error", { error });
+      console.error("run-error", error);
+      this.log.error("run-error", { error: maybeZodErrorMessage(error) });
     }
   }
 }
