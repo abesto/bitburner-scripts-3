@@ -106,6 +106,8 @@ export const API = z.object({
     .args(db, key, z.string().array().describe("values").nonempty())
     .returns(z.number().describe("number of members removed")),
 
+  scard: z.function().args(db, key).returns(z.number()),
+
   xadd: z
     .function()
     .args(

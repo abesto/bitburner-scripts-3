@@ -332,6 +332,13 @@ export class RedisService
     await res.success(API.shape.srem.returnType().parse(removed));
   };
 
+  scard = async (req: Request, res: Res) => {
+    const [db, key] = API.shape.scard.parameters().parse(req.args);
+    const set = this.storage.read(db, "set", key);
+    const count = set === null ? 0 : set.size;
+    await res.success(API.shape.scard.returnType().parse(count));
+  };
+
   xadd = async (req: Request, res: Res) => {
     const [db, key, streamIdInput, fieldValues, threshold] = API.shape.xadd
       .parameters()
