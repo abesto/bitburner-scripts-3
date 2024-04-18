@@ -25,7 +25,7 @@ export class ClientPort {
   async write(data: unknown, options?: ClientWriteOptions): Promise<void> {
     const backoff = options?.backoff ?? true;
     let old: unknown = this.port.write(data);
-    await this.ns.sleep(0);
+    await this.ns.asleep(0);
     if (!backoff) {
       if (old !== null) {
         this.log.tdebug("Port full", {

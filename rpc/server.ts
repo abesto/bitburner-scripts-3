@@ -211,7 +211,7 @@ class RequestHandler {
     );
     const port = new ClientPort(this.ns, request.responseMeta.port);
     port.writeSync(response);
-    await this.ns.sleep(0);
+    await this.ns.asleep(0);
   }
 
   private async respondSuccess(request: Request, result: unknown) {
@@ -285,7 +285,7 @@ export abstract class BaseService<Event extends { type: unknown }> {
   private async yieldIfNeeded(): Promise<void> {
     if (Date.now() - this.lastYield > this.maxTimeSlice()) {
       this.lastYield = Date.now();
-      await this.ns.sleep(0);
+      await this.ns.asleep(0);
     }
   }
 

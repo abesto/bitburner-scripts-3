@@ -233,7 +233,7 @@ export class DockerService
       if (!this.ns.scp(script, host)) {
         throw new Error(`failed to scp ${script} to host=${host}`);
       }
-      await this.ns.sleep(0);
+      await this.ns.asleep(0);
       let taskId = generateId(ID_BYTES);
       while (await this.redis.exists([REDIS_KEYS.TASK(service.id, taskId)])) {
         taskId = generateId(ID_BYTES);
@@ -582,5 +582,62 @@ export class DockerService
       status: success ? "complete" : "failed",
     };
     await this.redis.set(taskKey, JSON.stringify(task), {});
+  };
+
+  taskRegister = async (req: Request, res: Res) => {
+    const [{ serviceId, pid, replicas }] = API.shape.taskRegister
+      .parameters()
+      .parse(req.args);
+    const service = await this.lookupService(serviceId);
+    if (service === null) {
+      throw new Error(`service not found: ${serviceId}`);
+    }
+
+    const process = this.ns.getRunningScript(pid);
+    if (process === null) {
+      throw new Error(`process not found: ${pid.toString()}`);
+    }
+
+    const taskNum = await this.redis.scard(REDIS_KEYS.TASKS(serviceId));
+    const task: Task = {
+      id: generateId(ID_BYTES),
+      hostname: process.server,
+      labels: {},
+      name: `${service.spec.name}.${taskNum.toString()}`,
+      pid,
+      ram: process.ramUsage,
+      serviceId,
+      status: {
+        timestamp: new Date().toISOString(),
+        status: "running",
+      },
+      threads: process.threads,
+      version: 0,
+      spec: service.spec.taskTemplate,
+    };
+    await this.redis.del([REDIS_KEYS.TASKS(serviceId)]);
+    await this.redis.sadd(REDIS_KEYS.TASKS(serviceId), [task.id]);
+    await this.redis.set(
+      REDIS_KEYS.TASK(serviceId, task.id),
+      JSON.stringify(task),
+      {}
+    );
+    await this.redis.set(
+      REDIS_KEYS.PID_TO_TASK(pid),
+      REDIS_KEYS.TASK(serviceId, task.id),
+      {}
+    );
+
+    service.spec.mode = {
+      type: "replicated",
+      replicas,
+    };
+    await this.redis.set(
+      REDIS_KEYS.SERVICE(serviceId),
+      JSON.stringify(service),
+      {}
+    );
+
+    await res.success(API.shape.taskRegister.returnType().parse(task.id));
   };
 }

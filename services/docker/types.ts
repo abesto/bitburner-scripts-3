@@ -170,5 +170,16 @@ export const API = z.object({
     .returns(z.literal("OK")),
 
   taskList: z.function().args(TaskListQuery).returns(Task.array()),
+
+  taskRegister: z
+    .function()
+    .args(
+      z.object({
+        serviceId: ServiceID,
+        pid: z.number(),
+        replicas: z.number(),
+      })
+    )
+    .returns(z.string()),
 });
 export type API = z.infer<typeof API>;
