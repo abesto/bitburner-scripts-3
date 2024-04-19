@@ -1,7 +1,7 @@
 import { CliContext } from "lib/cli";
 import { dockerClient } from "services/docker/client";
 import { ArgumentsCamelCase, Argv } from "yargs";
-import YAML from "yaml";
+import { load as loadYaml } from "js-yaml";
 import { z } from "zod";
 import { LABELS } from "services/docker/constants";
 import { Placement, ServiceMode } from "services/docker/types";
@@ -9,6 +9,8 @@ import { Placement, ServiceMode } from "services/docker/types";
 export const command = "deploy <stack>";
 export const describe = "Deploy a new stack or update an existing stack";
 export const aliases = ["up"];
+
+RegExp.prototype["__exec__"] = RegExp.prototype["exec"];
 
 interface DeployOptions {
   stack: string;
@@ -62,11 +64,12 @@ export const handler = async ({
   stack,
   composeFile,
 }: ArgumentsCamelCase<CliContext & DeployOptions>) => {
-  if (!ns.fileExists(composeFile)) {
-    throw new Error(`File not found: ${composeFile}`);
+  const rawYaml = ns.read(composeFile);
+  if (rawYaml === "") {
+    throw new Error("Empty or missing Compose file");
   }
 
-  const compose = ComposeFile.parse(YAML.parse(ns.read(composeFile)));
+  const compose = ComposeFile.parse(loadYaml(rawYaml));
   log.tdebug("Compose file", compose);
   const docker = dockerClient(ns);
   const services = await docker.serviceList({

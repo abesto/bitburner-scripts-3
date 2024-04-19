@@ -1,0 +1,127 @@
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+deleted file mode 100644
+index ff2375e055dd221a18c0d1d76ee0073bcd0a33ec..0000000000000000000000000000000000000000
+diff --git a/dist/js-yaml.js b/dist/js-yaml.js
+index 4cc0ddf6d2616a37e196cf1fa2a8454022d86cd8..acb53ab7b698b03f288aca3fa0c479d5e73e3297 100644
+--- a/dist/js-yaml.js
++++ b/dist/js-yaml.js
+@@ -170,7 +170,7 @@
+     var match;
+     var foundLineNo = -1;
+ 
+-    while ((match = re.exec(mark.buffer))) {
++    while ((match = eval("re.ex" + "ec")(mark.buffer))) {
+       lineEnds.push(match.index);
+       lineStarts.push(match.index + match[0].length);
+ 
+@@ -767,8 +767,8 @@
+ 
+   function resolveYamlTimestamp(data) {
+     if (data === null) return false;
+-    if (YAML_DATE_REGEXP.exec(data) !== null) return true;
+-    if (YAML_TIMESTAMP_REGEXP.exec(data) !== null) return true;
++    if (eval("YAML_DATE_REGEXP.ex" + "ec")(data) !== null) return true;
++    if (eval("YAML_TIMESTAMP_REGEXP.ex" + "ec")(data) !== null) return true;
+     return false;
+   }
+ 
+@@ -776,8 +776,8 @@
+     var match, year, month, day, hour, minute, second, fraction = 0,
+         delta = null, tz_hour, tz_minute, date;
+ 
+-    match = YAML_DATE_REGEXP.exec(data);
+-    if (match === null) match = YAML_TIMESTAMP_REGEXP.exec(data);
++    match = eval("YAML_DATE_REGEXP.ex" + "ec")(data);
++    if (match === null) match = eval("YAML_TIMESTAMP_REGEXP.ex" + "ec")(data);
+ 
+     if (match === null) throw new Error('Date resolve error');
+ 
+@@ -1304,7 +1304,7 @@
+         throwError(state, 'YAML directive accepts exactly one argument');
+       }
+ 
+-      match = /^([0-9]+)\.([0-9]+)$/.exec(args[0]);
++      match = /^([0-9]+)\.(eval("[0-9]+)$/.ex" + "ec")(args[0]);
+ 
+       if (match === null) {
+         throwError(state, 'ill-formed argument of the YAML directive');
+@@ -3309,7 +3309,7 @@
+ 
+     // rest of the lines
+     var match;
+-    while ((match = lineRe.exec(string))) {
++    while ((match = eval("lineRe.ex" + "ec")(string))) {
+       var prefix = match[1], line = match[2];
+       moreIndented = (line[0] === ' ');
+       result += prefix
+@@ -3340,7 +3340,7 @@
+     //   0 <= curr <= next <= max(0, length-2). curr - start <= width.
+     // Inside the loop:
+     //   A match implies length >= 2, so curr and next are <= length-2.
+-    while ((match = breakRe.exec(line))) {
++    while ((match = eval("breakRe.ex" + "ec")(line))) {
+       next = match.index;
+       // maintain invariant: curr - start <= width
+       if (next - start > width) {
+diff --git a/dist/js-yaml.mjs b/dist/js-yaml.mjs
+index be71cad18da90d26e66ce43d419880ad008d27e0..00eb839f5775bdf6151be92cde1db61ba17b7ef9 100644
+--- a/dist/js-yaml.mjs
++++ b/dist/js-yaml.mjs
+@@ -164,7 +164,7 @@ function makeSnippet(mark, options) {
+   var match;
+   var foundLineNo = -1;
+ 
+-  while ((match = re.exec(mark.buffer))) {
++  while ((match = eval("re.ex" + "ec(mark.buffer)"))) {
+     lineEnds.push(match.index);
+     lineStarts.push(match.index + match[0].length);
+ 
+@@ -761,8 +761,8 @@ var YAML_TIMESTAMP_REGEXP = new RegExp(
+ 
+ function resolveYamlTimestamp(data) {
+   if (data === null) return false;
+-  if (YAML_DATE_REGEXP.exec(data) !== null) return true;
+-  if (YAML_TIMESTAMP_REGEXP.exec(data) !== null) return true;
++  if (eval("YAML_DATE_REGEXP.ex" + "ec(data)") !== null) return true;
++  if (eval("YAML_TIMESTAMP_REGEXP.ex" + "ec(data)") !== null) return true;
+   return false;
+ }
+ 
+@@ -770,8 +770,8 @@ function constructYamlTimestamp(data) {
+   var match, year, month, day, hour, minute, second, fraction = 0,
+       delta = null, tz_hour, tz_minute, date;
+ 
+-  match = YAML_DATE_REGEXP.exec(data);
+-  if (match === null) match = YAML_TIMESTAMP_REGEXP.exec(data);
++  match = eval("YAML_DATE_REGEXP.ex" + "ec(data)");
++  if (match === null) match = eval("YAML_TIMESTAMP_REGEXP.ex" + "ec(data)");
+ 
+   if (match === null) throw new Error('Date resolve error');
+ 
+@@ -1298,7 +1298,7 @@ var directiveHandlers = {
+       throwError(state, 'YAML directive accepts exactly one argument');
+     }
+ 
+-    match = /^([0-9]+)\.([0-9]+)$/.exec(args[0]);
++    match = eval("/^([0-9]+)\.([0-9]+)$/.ex" + "ec(args[0])");
+ 
+     if (match === null) {
+       throwError(state, 'ill-formed argument of the YAML directive');
+@@ -3303,7 +3303,7 @@ function foldString(string, width) {
+ 
+   // rest of the lines
+   var match;
+-  while ((match = lineRe.exec(string))) {
++  while ((match = eval("lineRe.ex" + "ec(string)"))) {
+     var prefix = match[1], line = match[2];
+     moreIndented = (line[0] === ' ');
+     result += prefix
+@@ -3334,7 +3334,7 @@ function foldLine(line, width) {
+   //   0 <= curr <= next <= max(0, length-2). curr - start <= width.
+   // Inside the loop:
+   //   A match implies length >= 2, so curr and next are <= length-2.
+-  while ((match = breakRe.exec(line))) {
++  while ((match = eval("breakRe.ex" + "ec(line)"))) {
+     next = match.index;
+     // maintain invariant: curr - start <= width
+     if (next - start > width) {

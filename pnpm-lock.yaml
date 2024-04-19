@@ -8,6 +8,9 @@ patchedDependencies:
   '@types/yargs@17.0.32':
     hash: oekjk4zdhjc74k35hp3zkb75fi
     path: patches/@types__yargs@17.0.32.patch
+  js-yaml@4.1.0:
+    hash: x45u55rwetogbg5vcfskyvv5py
+    path: patches/js-yaml@4.1.0.patch
   yargs@17.7.2:
     hash: 5b45kbnw6sqofe5umt4gdf3sge
     path: patches/yargs@17.7.2.patch
@@ -31,12 +34,12 @@ dependencies:
   esbuild-bitburner-plugin:
     specifier: ^1.5.1
     version: 1.5.1
+  js-yaml:
+    specifier: ^4.1.0
+    version: 4.1.0(patch_hash=x45u55rwetogbg5vcfskyvv5py)
   minimatch:
     specifier: ^9.0.4
     version: 9.0.4
-  yaml:
-    specifier: ^2.4.1
-    version: 2.4.1
   yargs:
     specifier: ^17.7.2
     version: 17.7.2(patch_hash=5b45kbnw6sqofe5umt4gdf3sge)
@@ -54,6 +57,9 @@ devDependencies:
   '@types/eslint__js':
     specifier: ^8.42.3
     version: 8.42.3
+  '@types/js-yaml':
+    specifier: ^4.0.9
+    version: 4.0.9
   '@typescript-eslint/eslint-plugin':
     specifier: ^7.6.0
     version: 7.6.0(@typescript-eslint/parser@7.6.0)(eslint@8.57.0)(typescript@5.4.5)
@@ -295,7 +301,7 @@ packages:
       globals: 13.24.0
       ignore: 5.3.1
       import-fresh: 3.3.0
-      js-yaml: 4.1.0
+      js-yaml: 4.1.0(patch_hash=x45u55rwetogbg5vcfskyvv5py)
       minimatch: 3.1.2
       strip-json-comments: 3.1.1
     transitivePeerDependencies:
@@ -502,6 +508,10 @@ packages:
 
   /@types/estree@1.0.5:
     resolution: {integrity: sha512-/kYRxGDLWzHOB7q+wtSUQlFrtcdUccpfy+X+9iMBpHK8QLLhx2wIPYuS5DYtR9Wa/YlZAbIovy7qVdB1Aq6Lyw==}
+    dev: true
+
+  /@types/js-yaml@4.0.9:
+    resolution: {integrity: sha512-k4MGaQl5TGo/iipqb2UDG2UwjXziSWkh0uysQelTlJpX1qGlpUZYm8PnO4DxG1qBomtJUdYJ6qR6xdIah10JLg==}
     dev: true
 
   /@types/json-schema@7.0.15:
@@ -751,7 +761,6 @@ packages:
 
   /argparse@2.0.1:
     resolution: {integrity: sha512-8+9WqebbFzpX9OR+Wa6O29asIogeRMzcGtAINdpMHHyAg10f05aSFVBbcEqGf/PXw1EjAZ+q2/bEBg3DvurK3Q==}
-    dev: true
 
   /array-shuffle@3.0.0:
     resolution: {integrity: sha512-rogEGxHOQPhslOhpg12LJkB+bbAl484/s2AJq0BxtzQDQfKl76fS2u9zWgg3p3b9ENcuvE7K8A7l5ddiPjCRnw==}
@@ -1118,7 +1127,7 @@ packages:
       imurmurhash: 0.1.4
       is-glob: 4.0.3
       is-path-inside: 3.0.3
-      js-yaml: 4.1.0
+      js-yaml: 4.1.0(patch_hash=x45u55rwetogbg5vcfskyvv5py)
       json-stable-stringify-without-jsonify: 1.0.1
       levn: 0.4.1
       lodash.merge: 4.6.2
@@ -1442,12 +1451,12 @@ packages:
     resolution: {integrity: sha512-WriZw1luRMlmV3LGJaR6QOJjWwgLUTf89OwT2lUOyjX2dJGBwgmIkbcz+7WFZjrZM635JOIR517++e/67CP9dQ==}
     dev: true
 
-  /js-yaml@4.1.0:
+  /js-yaml@4.1.0(patch_hash=x45u55rwetogbg5vcfskyvv5py):
     resolution: {integrity: sha512-wpxZs9NoxZaJESJGIZTyDEaYpl0FKSA+FB9aJiyemKhMwkxQg63h4T1KJgUGHpTqPDNRcmmYLugrRjJlBtWvRA==}
     hasBin: true
     dependencies:
       argparse: 2.0.1
-    dev: true
+    patched: true
 
   /json-buffer@3.0.1:
     resolution: {integrity: sha512-4bV5BfR2mqfQTJm+V5tPPdf+ZpuhiIvTuAB5g8kcrXOZpTT/QwwVRWBywX1ozr6lEuPdbHxwaJlm9G6mI2sfSQ==}
@@ -2166,12 +2175,6 @@ packages:
   /yallist@4.0.0:
     resolution: {integrity: sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A==}
     dev: true
-
-  /yaml@2.4.1:
-    resolution: {integrity: sha512-pIXzoImaqmfOrL7teGUBt/T7ZDnyeGBWyXQBvOVhLkWLN37GXv8NMLK406UY6dS51JfcQHsmcW5cJ441bHg6Lg==}
-    engines: {node: '>= 14'}
-    hasBin: true
-    dev: false
 
   /yargs-parser@21.1.1:
     resolution: {integrity: sha512-tVpsJW7DdjecAiFpbIB1e3qxIQsE6NoPc5/eTdrbbIC4h0LVsWhnoa3g+m2HclBIujHzsxZ4VJVA+GUuc2/LBw==}

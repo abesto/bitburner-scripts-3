@@ -22,7 +22,8 @@ const createContext = async () =>
     bundle: true,
     format: "esm",
     platform: "browser",
-    logLevel: "debug",
+    logLevel: "info",
+    treeShaking: true,
   });
 
 const ctx = await createContext();
