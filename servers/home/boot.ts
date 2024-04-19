@@ -2,8 +2,6 @@ import { maybeZodErrorMessage } from "lib/error";
 import { Log } from "lib/log";
 import { dockerClient } from "services/docker/client";
 import { LABELS } from "services/docker/constants";
-import { Service } from "services/docker/types";
-import { redisClient } from "services/redis/client";
 
 const SLEEP_MS = 100;
 

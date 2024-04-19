@@ -4,11 +4,7 @@ import { ArgumentsCamelCase, Argv } from "yargs";
 import YAML from "yaml";
 import { z } from "zod";
 import { LABELS } from "services/docker/constants";
-import {
-  Placement,
-  PlacementConstraint,
-  ServiceMode,
-} from "services/docker/types";
+import { Placement, ServiceMode } from "services/docker/types";
 
 export const command = "deploy <stack>";
 export const describe = "Deploy a new stack or update an existing stack";
