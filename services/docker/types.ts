@@ -37,9 +37,19 @@ export type SwarmCapacity = z.infer<typeof SwarmCapacity>;
 
 export const PlacementConstraint = z
   .string()
-  .transform((s) => s.split("="))
+  .transform((s) => s.split("=="))
   .pipe(z.tuple([z.enum(["node.hostname"]), z.string()]));
 export type PlacementConstraint = z.infer<typeof PlacementConstraint>;
+
+export const Placement = z.object({
+  constraints: z
+    .string()
+    .refine((s) => PlacementConstraint.parse(s), {
+      message: "Invalid placement constraint",
+    })
+    .array(),
+});
+export type Placement = z.infer<typeof Placement>;
 
 export const TaskSpec = z.object({
   containerSpec: z.object({
@@ -57,14 +67,7 @@ export const TaskSpec = z.object({
     delay: z.number(),
     maxAttempts: z.number(),
   }),
-  placement: z.object({
-    constraints: z
-      .string()
-      .refine((s) => PlacementConstraint.parse(s), {
-        message: "Invalid placement constraint",
-      })
-      .array(),
-  }),
+  placement: Placement,
 });
 export type TaskSpec = z.infer<typeof TaskSpec>;
 
@@ -164,9 +167,16 @@ export const API = z.object({
   // so always include it.
   serviceList: z
     .function()
-    .args
-    // TODO this is where filters would live
-    ()
+    .args(
+      z
+        .object({
+          id: ServiceID.array().optional(),
+          label: Labels.optional(),
+          mode: z.enum(["replicated", "replicated-job"]).array().optional(),
+          name: ServiceName.array().optional(),
+        })
+        .describe("filters")
+    )
     .returns(ServiceWithStatus.array()),
 
   serviceInspect: z

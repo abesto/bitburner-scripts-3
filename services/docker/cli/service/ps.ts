@@ -34,10 +34,22 @@ export const handler = async ({
     "\n" +
       fmt
         .table(
-          ["ID", "NAME", "THREADS", "PID", "HOST", "RAM", "STATE"],
+          [
+            "ID",
+            "NAME",
+            "SCRIPT",
+            "ARGS",
+            "THREADS",
+            "PID",
+            "HOST",
+            "RAM",
+            "STATE",
+          ],
           ...tasks.map((task) => [
             task.id,
             task.name,
+            task.spec.containerSpec.command,
+            task.spec.containerSpec.args.slice(1).join(" "),
             task.threads.toString(),
             task.pid.toString(),
             nodesById.get(task.nodeId)?.hostname ?? "<unknown>",

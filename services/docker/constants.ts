@@ -12,4 +12,14 @@ export const LABELS = {
    * This is useful on `home` to reserve some RAM for running scripts.
    */
   ALLOCATOR_PRESERVE_RAM: "allocator.preserve-ram",
+
+  /**
+   * Identifies which stack, if any, this service is part of
+   */
+  STACK_NAMESPACE: "com.docker.stack.namespace",
+
+  /**
+   * Name of the service, as defined in the Compose file
+   */
+  STACK_SERVICE_NAME: "com.docker.stack.service.name",
 };

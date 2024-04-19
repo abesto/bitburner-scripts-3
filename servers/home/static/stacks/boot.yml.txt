@@ -1,0 +1,11 @@
+version: "3.8-bb"
+
+services:
+  redis:
+    command: services/redis.js
+    deploy:
+      mode: replicated
+      replicas: 0
+      placement:
+        constraints:
+          - "node.hostname==home"

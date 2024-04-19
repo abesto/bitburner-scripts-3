@@ -471,8 +471,18 @@ export class DockerService
   };
 
   serviceList = async (req: Request, res: Res) => {
-    API.shape.serviceList.parameters().parse(req.args);
-    const services = await this.lookupAllServices();
+    const [filters] = API.shape.serviceList.parameters().parse(req.args);
+    const services = (await this.lookupAllServices()).filter(
+      (s) =>
+        (filters.id ? filters.id.includes(s.id) : true) &&
+        (filters.name ? filters.name.includes(s.spec.name) : true) &&
+        (filters.label
+          ? Object.entries(filters.label).every(
+              ([key, value]) => s.spec.labels[key] === value
+            )
+          : true) &&
+        (filters.mode ? filters.mode.includes(s.spec.mode.type) : true)
+    );
 
     const tasks: Task[][] = [];
     for (const service of services) {

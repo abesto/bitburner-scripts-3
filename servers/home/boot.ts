@@ -1,6 +1,7 @@
 import { maybeZodErrorMessage } from "lib/error";
 import { Log } from "lib/log";
 import { dockerClient } from "services/docker/client";
+import { LABELS } from "services/docker/constants";
 import { Service } from "services/docker/types";
 import { redisClient } from "services/redis/client";
 
@@ -42,23 +43,6 @@ export const main = async (ns: NS) => {
     }
     await ns.asleep(SLEEP_MS);
 
-    // If there's already a Redis service registered, then inject the newly-started process
-    const redis = redisClient(ns);
-    let redisServiceId = await redis.get("docker:servicebyname:redis");
-    if (redisServiceId) {
-      const redisService = Service.parse(
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        JSON.parse((await redis.get(`docker:service:${redisServiceId}`))!)
-      );
-      redisService.spec.mode = { type: "replicated", replicas: 0 };
-      await redis.set(
-        `docker:service:${redisServiceId}`,
-        JSON.stringify(redisService),
-        {}
-      );
-      log.tinfo("Updated Redis service", { id: redisServiceId, replicas: 0 });
-    }
-
     // Start Docker
     const dockerPid = ns.run("services/docker.js");
     await ns.asleep(SLEEP_MS);
@@ -71,35 +55,43 @@ export const main = async (ns: NS) => {
       return;
     }
 
-    // Create new Redis service if there isn't one
     const docker = dockerClient(ns);
-    if (!redisServiceId) {
-      redisServiceId = await docker.serviceCreate({
-        name: "redis",
-        labels: {},
-        mode: { type: "replicated", replicas: 0 },
-        taskTemplate: {
-          containerSpec: {
-            labels: {},
-            command: "services/redis.js",
-            args: [],
-          },
-          restartPolicy: {
-            condition: "any",
-            delay: 0,
-            maxAttempts: 0,
-          },
-          placement: {
-            constraints: [],
-          },
-        },
-      });
-      log.tinfo("Created Redis service", { id: redisServiceId });
+    let redisServices = await docker.serviceList({
+      label: {
+        [LABELS.STACK_NAMESPACE]: "boot",
+        [LABELS.STACK_SERVICE_NAME]: "redis",
+      },
+    });
+    let redisService = redisServices[0];
+    if (redisService === undefined) {
+      // Create new Redis service if there isn't one
+      ns.run(
+        "docker.js",
+        1,
+        "stack",
+        "deploy",
+        "boot",
+        "--compose-file",
+        "stacks/boot.yml.txt"
+      );
+      await ns.sleep(100);
+    }
+
+    redisServices = await docker.serviceList({
+      label: {
+        [LABELS.STACK_NAMESPACE]: "boot",
+        [LABELS.STACK_SERVICE_NAME]: "redis",
+      },
+    });
+    redisService = redisServices[0];
+    if (redisService === undefined) {
+      log.terror("Failed to start Redis service");
+      return;
     }
 
     // Register Redis service
     const redisTaskId = await docker.taskRegister({
-      serviceId: redisServiceId,
+      serviceId: redisService.id,
       pid: redisProcess.pid,
       replicas: 1,
     });

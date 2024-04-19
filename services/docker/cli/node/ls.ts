@@ -3,6 +3,7 @@ import { dockerClient } from "services/docker/client";
 import { ArgumentsCamelCase } from "yargs";
 
 export const command = "ls";
+export const aliases = ["list"];
 export const describe = "List nodes in the swarm";
 
 export const handler = async ({
