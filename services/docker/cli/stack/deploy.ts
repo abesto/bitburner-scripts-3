@@ -10,8 +10,6 @@ export const command = "deploy <stack>";
 export const describe = "Deploy a new stack or update an existing stack";
 export const aliases = ["up"];
 
-RegExp.prototype["__exec__"] = RegExp.prototype["exec"];
-
 interface DeployOptions {
   stack: string;
   ["compose-file"]: string;

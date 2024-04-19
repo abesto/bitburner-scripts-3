@@ -295,7 +295,7 @@ export abstract class BaseService<Event extends { type: unknown }> {
     }
   }
 
-  async run(): Promise<void> {
+  async serve(): Promise<void> {
     await this.setup();
 
     try {
