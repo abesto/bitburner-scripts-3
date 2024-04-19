@@ -139,6 +139,7 @@ export type ServiceWithStatus = z.infer<typeof ServiceWithStatus>;
 export const TaskListQuery = z.object({
   filters: z.object({
     service: z.string().array().optional(),
+    label: Labels.optional(),
   }),
 });
 export type TaskListQuery = z.infer<typeof TaskListQuery>;
@@ -200,6 +201,7 @@ export const API = z.object({
         serviceId: ServiceID,
         pid: z.number(),
         replicas: z.number(),
+        labels: Labels,
       })
     )
     .returns(z.string()),

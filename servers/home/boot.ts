@@ -53,12 +53,14 @@ export const main = async (ns: NS) => {
       return;
     }
 
+    const labels = {
+      [LABELS.STACK_NAMESPACE]: "boot",
+      [LABELS.STACK_SERVICE_NAME]: "redis",
+    };
+
     const docker = dockerClient(ns);
     let redisServices = await docker.serviceList({
-      label: {
-        [LABELS.STACK_NAMESPACE]: "boot",
-        [LABELS.STACK_SERVICE_NAME]: "redis",
-      },
+      label: labels,
     });
     let redisService = redisServices[0];
     if (redisService === undefined) {
@@ -76,10 +78,7 @@ export const main = async (ns: NS) => {
     }
 
     redisServices = await docker.serviceList({
-      label: {
-        [LABELS.STACK_NAMESPACE]: "boot",
-        [LABELS.STACK_SERVICE_NAME]: "redis",
-      },
+      label: labels,
     });
     redisService = redisServices[0];
     if (redisService === undefined) {
@@ -92,6 +91,7 @@ export const main = async (ns: NS) => {
       serviceId: redisService.id,
       pid: redisProcess.pid,
       replicas: 1,
+      labels,
     });
 
     log.tinfo("Registered Redis task", { id: redisTaskId });

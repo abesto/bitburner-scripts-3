@@ -600,6 +600,16 @@ export class DockerService
     for (const id of serviceIds) {
       tasks = tasks.concat(await this.lookupTasks(id));
     }
+
+    const labelFilter = query.filters.label;
+    if (labelFilter !== undefined) {
+      tasks = tasks.filter((t) =>
+        Object.entries(labelFilter).every(
+          ([key, value]) => t.labels[key] === value
+        )
+      );
+    }
+
     await res.success(API.shape.taskList.returnType().parse(tasks));
   };
 
@@ -651,7 +661,7 @@ export class DockerService
   };
 
   taskRegister = async (req: Request, res: Res) => {
-    const [{ serviceId, pid, replicas }] = API.shape.taskRegister
+    const [{ serviceId, pid, replicas, labels }] = API.shape.taskRegister
       .parameters()
       .parse(req.args);
     const service = await this.lookupService(serviceId);
@@ -674,7 +684,7 @@ export class DockerService
     const task: Task = {
       id: generateId(ID_BYTES),
       nodeId: node.id,
-      labels: {},
+      labels,
       name: `${service.spec.name}.${taskNum.toString()}`,
       pid,
       ram: process.ramUsage,

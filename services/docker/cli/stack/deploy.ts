@@ -114,6 +114,7 @@ export const handler = async ({
           placement: placement ?? service.spec.taskTemplate.placement,
           containerSpec: {
             ...service.spec.taskTemplate.containerSpec,
+            labels,
             args: spec.args ?? [],
             command: spec.command,
           },
@@ -131,7 +132,7 @@ export const handler = async ({
           containerSpec: {
             args: spec.args ?? [],
             command: spec.command,
-            labels: {},
+            labels,
           },
         },
       });
