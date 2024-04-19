@@ -11,7 +11,9 @@ interface ScaleOptions {
   spec: string;
 }
 
-export const builder = (yargs: Argv<CliContext>) =>
+export const builder = (
+  yargs: Argv<CliContext>
+): Argv<CliContext & ScaleOptions> =>
   yargs.positional("spec", {
     type: "string",
     describe: "service=replicas",

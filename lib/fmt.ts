@@ -146,6 +146,10 @@ export function highlightJSON(value: unknown): string {
     value === null
   ) {
     return highlightValue(value);
+  } else if (value instanceof Map) {
+    return `Map(${value.size.toString()})${highlightJSON(
+      Object.fromEntries(value.entries())
+    )}`;
   } else if (typeof value === "object") {
     if (Array.isArray(value)) {
       const parts = value.map((value) => highlightJSON(value));

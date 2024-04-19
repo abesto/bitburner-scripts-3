@@ -84,6 +84,7 @@ export class ExitCodeEventProvider
   }
 
   next: () => Promise<ExitCodeServerEvent> = async () => {
+    this.queue = this.queue.concat(await this.subscriber.poll());
     while (this.queue.length === 0) {
       this.queue = this.queue.concat(await this.subscriber.poll(this.block));
     }

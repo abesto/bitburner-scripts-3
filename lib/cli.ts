@@ -47,5 +47,6 @@ export const cliMain =
       });
     } catch (e) {
       ctx.log.terror(maybeZodErrorMessage(e));
+      console.error(`cli:${name}`, e);
     }
   };

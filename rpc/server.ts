@@ -163,6 +163,12 @@ class RequestHandler {
         method: request.method,
         args: request.args,
       });
+      console.error(
+        "execute-error",
+        error,
+        maybeZodErrorMessage(error).toString()
+      );
+      await this.respondError(request, maybeZodErrorMessage(error));
     }
   }
 
@@ -299,7 +305,7 @@ export abstract class BaseService<Event extends { type: unknown }> {
         await this.yieldIfNeeded();
       }
     } catch (error) {
-      console.error("run-error", error);
+      console.error("run-error", error, maybeZodErrorMessage(error).toString());
       this.log.error("run-error", { error: maybeZodErrorMessage(error) });
     }
   }

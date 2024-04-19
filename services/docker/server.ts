@@ -10,9 +10,11 @@ import { allocateThreads, calculateHostCandidates } from "./algorithms";
 import { generateId } from "lib/id";
 import {
   API,
+  DockerNode,
   PlacementConstraint,
   Service,
   ServiceStatus,
+  SwarmCapacityData,
   SwarmCapacityEntry,
   Task,
 } from "./types";
@@ -29,10 +31,13 @@ import { maybeZodErrorMessage } from "lib/error";
 import { LABELS } from "./constants";
 
 const REDIS_KEYS = {
-  NODES: "docker:swarm:nodes",
+  NODES: "docker:nodes",
+  NODE: (id: string) => `docker:node:${id}`,
+
   SERVICES: "docker:services",
   SERVICE: (id: string) => `docker:service:${id}`,
   SERVICE_BY_NAME: (name: string) => `docker:servicebyname:${name}`,
+
   TASKS: (serviceId: string) => `docker:service:${serviceId}:tasks`,
   TASK: (serviceId: string, taskId: string) =>
     `docker:service:${serviceId}:task:${taskId}`,
@@ -80,14 +85,14 @@ export class DockerService
   }
 
   override async setup() {
-    await this.redis.sadd(REDIS_KEYS.NODES, [this.ns.getHostname()]);
+    await this.doSwarmJoin("home");
     this.timers.setInterval(() => this.keepalive(), 10000);
   }
 
   async keepalive() {
     // TODO respect restartPolicy.delay & maxAttempts
     const services = await this.lookupAllServices();
-    const deadTasks = [];
+    const deadTasks: Task[] = [];
 
     for (const service of services) {
       try {
@@ -100,19 +105,28 @@ export class DockerService
           if (!this.ns.getRunningScript(task.pid)) {
             this.log.twarn("task", {
               service: service.spec.name,
-              task: task.name || task.id,
+              task: `${task.name}(${task.id})`,
               result: "crashed",
             });
-            deadTasks.push(task.id);
+            deadTasks.push(task);
           }
         }
 
         if (deadTasks.length > 0) {
-          await this.redis.srem(
-            REDIS_KEYS.TASKS(service.id),
-            deadTasks as [string, ...string[]]
+          for (const task of deadTasks) {
+            task.status = {
+              timestamp: new Date().toISOString(),
+              status: "failed",
+            };
+          }
+          await this.redis.mset(
+            Object.fromEntries(
+              deadTasks.map((t) => [
+                REDIS_KEYS.TASK(service.id, t.id),
+                JSON.stringify(t),
+              ])
+            )
           );
-          await this.redis.del(deadTasks as [string, ...string[]]);
         }
 
         await this.scaleDown(service);
@@ -208,7 +222,7 @@ export class DockerService
     );
     this.log.debug("scaleUp", { name, hostCandidates });
 
-    const allocations = allocateThreads(
+    const allocations: [DockerNode, number][] = allocateThreads(
       scriptRam,
       threads,
       capacity,
@@ -216,8 +230,8 @@ export class DockerService
     );
     this.log.debug("scaleUp", { name, allocations });
 
-    const allocated = Object.values(allocations).reduce(
-      (sum, threads) => sum + threads,
+    const allocated = allocations.reduce(
+      (sum, [, threads]) => sum + threads,
       0
     );
     if (allocated !== threads) {
@@ -229,9 +243,9 @@ export class DockerService
     }
 
     const tasks: Task[] = [];
-    for (const [host, threads] of Object.entries(allocations)) {
-      if (!this.ns.scp(script, host)) {
-        throw new Error(`failed to scp ${script} to host=${host}`);
+    for (const [node, threads] of allocations) {
+      if (!this.ns.scp(script, node.hostname)) {
+        throw new Error(`failed to scp ${script} to host=${node.hostname}`);
       }
       await this.ns.asleep(0);
       let taskId = generateId(ID_BYTES);
@@ -240,7 +254,7 @@ export class DockerService
       }
       const execArgs: [string, string, RunOptions, ...string[]] = [
         script,
-        host,
+        node.hostname,
         {
           threads,
           ramOverride: scriptRam,
@@ -256,11 +270,11 @@ export class DockerService
       tasks.push({
         id: taskId,
         version: 0,
-        name: `${name}.${(tasks.length + 1).toString()}`,
+        name: `${name}.${(tasks.length + oldTasks.length + 1).toString()}`,
         labels: service.spec.taskTemplate.containerSpec.labels,
         spec: service.spec.taskTemplate,
         serviceId: service.id,
-        hostname: host,
+        nodeId: node.id,
         status: {
           timestamp: new Date().toISOString(),
           status: "running",
@@ -292,24 +306,37 @@ export class DockerService
     }
   };
 
-  private getSwarmCapacity = async () => {
-    const total = { used: 0, max: 0 };
-    const hosts: Record<string, SwarmCapacityEntry> = {};
+  private nodeReservedRam(node: DockerNode): number {
+    try {
+      return parseFloat(node.labels[LABELS.ALLOCATOR_PRESERVE_RAM] ?? "0");
+    } catch {
+      return 0;
+    }
+  }
 
-    const hostnames = await this.redis.smembers(REDIS_KEYS.NODES);
-    for (const hostname of hostnames) {
-      if (!this.ns.hasRootAccess(hostname)) {
-        this.log.twarn("leaving", { hostname, reason: "no-root" });
-        await this.redis.srem(REDIS_KEYS.NODES, [hostname]);
+  private getSwarmCapacity = async () => {
+    const total: SwarmCapacityData = { used: 0, max: 0 };
+    const hosts: SwarmCapacityEntry[] = [];
+
+    const nodes = await this.loadNodes();
+    for (const node of nodes) {
+      if (!this.ns.hasRootAccess(node.hostname)) {
+        this.log.twarn("leaving", { node, reason: "no-root" });
+        await this.redis.srem(REDIS_KEYS.NODES, [node.hostname]);
+        await this.redis.del([REDIS_KEYS.NODE(node.id)]);
         continue;
       }
-      const capacity = {
-        max: this.ns.getServerMaxRam(hostname),
-        used: this.ns.getServerUsedRam(hostname),
-      };
-      total.used += capacity.used;
-      total.max += capacity.max;
-      hosts[hostname] = capacity;
+      const entry: SwarmCapacityEntry = [
+        node,
+        {
+          max:
+            this.ns.getServerMaxRam(node.hostname) - this.nodeReservedRam(node),
+          used: this.ns.getServerUsedRam(node.hostname),
+        },
+      ];
+      total.used += entry[1].used;
+      total.max += entry[1].max;
+      hosts.push(entry);
     }
     return { total, hosts };
   };
@@ -321,21 +348,50 @@ export class DockerService
     );
   };
 
-  swarmJoin = async (req: Request, res: Res) => {
-    const [hostname] = API.shape.swarmJoin.parameters().parse(req.args);
+  private loadNodes = async (): Promise<DockerNode[]> => {
+    const hostnames = await this.redis.smembers(REDIS_KEYS.NODES);
+    if (hostnames.length === 0) {
+      return [];
+    }
+    const nodes = await this.redis.mget(
+      hostnames.map(REDIS_KEYS.NODE) as [string, ...string[]]
+    );
+    return nodes
+      .filter((n) => n !== null)
+      .map((n) => DockerNode.parse(JSON.parse(n as string)));
+  };
+
+  private doSwarmJoin = async (hostname: string) => {
     if (!this.ns.hasRootAccess(hostname)) {
       throw new Error(`no root access: ${hostname}`);
     }
-    if ((await this.redis.sadd(REDIS_KEYS.NODES, [hostname])) === 1) {
-      this.log.info("join", { hostname, result: "success" });
+    const nodes = await this.loadNodes();
+    if (!nodes.some((n) => n.hostname === hostname)) {
+      let id = generateId(ID_BYTES);
+      while (nodes.some((n) => n.id === id)) {
+        id = generateId(ID_BYTES);
+      }
+      const node: DockerNode = {
+        id: generateId(ID_BYTES),
+        version: 0,
+        hostname,
+        labels: {},
+      };
+      await this.redis.set(REDIS_KEYS.NODE(node.id), JSON.stringify(node), {});
+      await this.redis.sadd(REDIS_KEYS.NODES, [node.id]);
+      this.log.info("swarm-join", { hostname, result: "success" });
     } else {
-      this.log.debug("join", {
+      this.log.debug("swarm-join", {
         hostname,
         result: "skip",
         reason: "already-joined",
       });
     }
+  };
 
+  swarmJoin = async (req: Request, res: Res) => {
+    const [hostname] = API.shape.swarmJoin.parameters().parse(req.args);
+    await this.doSwarmJoin(hostname);
     await res.success(API.shape.swarmJoin.returnType().parse("OK"));
   };
 
@@ -598,10 +654,16 @@ export class DockerService
       throw new Error(`process not found: ${pid.toString()}`);
     }
 
+    const nodes = await this.loadNodes();
+    const node = nodes.find((n) => n.hostname === process.server);
+    if (node === undefined) {
+      throw new Error(`node not found: ${process.server}`);
+    }
+
     const taskNum = await this.redis.scard(REDIS_KEYS.TASKS(serviceId));
     const task: Task = {
       id: generateId(ID_BYTES),
-      hostname: process.server,
+      nodeId: node.id,
       labels: {},
       name: `${service.spec.name}.${taskNum.toString()}`,
       pid,
@@ -639,5 +701,48 @@ export class DockerService
     );
 
     await res.success(API.shape.taskRegister.returnType().parse(task.id));
+  };
+
+  nodeInspect = async (req: Request, res: Res) => {
+    const [idOrName] = API.shape.nodeInspect.parameters().parse(req.args);
+    const rawNodeFromId = await this.redis.get(REDIS_KEYS.NODE(idOrName));
+
+    let node: DockerNode | undefined = undefined;
+    if (rawNodeFromId === null) {
+      const nodes = await this.loadNodes();
+      node = nodes.find((n) => n.hostname === idOrName);
+    } else {
+      node = DockerNode.parse(JSON.parse(rawNodeFromId));
+    }
+    if (node === undefined) {
+      throw new Error(`node not found: ${idOrName}`);
+    }
+
+    await res.success(API.shape.nodeInspect.returnType().parse(node));
+  };
+
+  nodeList = async (req: Request, res: Res) => {
+    const nodes = await this.loadNodes();
+    await res.success(API.shape.nodeList.returnType().parse(nodes));
+  };
+
+  nodeUpdate = async (req: Request, res: Res) => {
+    const [id, version, labels] = API.shape.nodeUpdate
+      .parameters()
+      .parse(req.args);
+    const rawNode = await this.redis.get(REDIS_KEYS.NODE(id));
+    if (rawNode === null) {
+      throw new Error(`node not found: ${id}`);
+    }
+    const node = DockerNode.parse(JSON.parse(rawNode));
+    if (node.version !== version) {
+      throw new Error(
+        `node version mismatch: expected ${node.version.toString()} got ${version.toString()}`
+      );
+    }
+    node.labels = labels;
+    node.version += 1;
+    await this.redis.set(REDIS_KEYS.NODE(id), JSON.stringify(node), {});
+    await res.success(API.shape.nodeUpdate.returnType().parse("OK"));
   };
 }

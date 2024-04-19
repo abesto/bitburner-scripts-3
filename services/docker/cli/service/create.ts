@@ -2,7 +2,7 @@ import { CliContext } from "lib/cli";
 import { dockerClient } from "services/docker/client";
 import { ServiceMode, ServiceSpec } from "services/docker/types";
 import { ArgumentsCamelCase, Argv } from "yargs";
-import { z } from "zod";
+import { parseLabels } from "../common";
 
 export const command = "create <script> [args..]";
 export const describe = "Create a new service";
@@ -108,14 +108,7 @@ export const handler = async (
 
   const serviceSpec: ServiceSpec = {
     name,
-    labels: Object.fromEntries(
-      z
-        .string()
-        .transform((s) => s.split("="))
-        .pipe(z.tuple([z.string(), z.string()]))
-        .array()
-        .parse(labels)
-    ),
+    labels: parseLabels(labels),
     taskTemplate: {
       containerSpec: {
         labels: {},

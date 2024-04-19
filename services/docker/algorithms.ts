@@ -1,4 +1,4 @@
-import { SwarmCapacity } from "./types";
+import { DockerNode, SwarmCapacity } from "./types";
 import arrayShuffle from "array-shuffle";
 
 export function calculateHostCandidates(
@@ -7,8 +7,8 @@ export function calculateHostCandidates(
   swarmCapacity: SwarmCapacity,
   hostnames: string[]
 ): string[] {
-  let capacity: [string, number][] = Object.entries(swarmCapacity.hosts).map(
-    ([host, { used, max }]) => [host, max - used]
+  let capacity: [DockerNode, number][] = swarmCapacity.hosts.map(
+    ([node, { used, max }]) => [node, max - used]
   );
   // Only want hosts that have enough memory for at least one thread
   capacity = capacity.filter(([, free]) => free >= scriptRam);
@@ -28,9 +28,9 @@ export function calculateHostCandidates(
   });
   // Apply host affinity
   if (hostnames.length > 0) {
-    capacity = capacity.filter(([host]) => hostnames.includes(host));
+    capacity = capacity.filter(([node]) => hostnames.includes(node.hostname));
   }
-  return capacity.map(([host]) => host);
+  return capacity.map(([node]) => node.hostname);
 }
 
 export function allocateThreads(
@@ -38,18 +38,17 @@ export function allocateThreads(
   threads: number,
   swarmCapacity: SwarmCapacity,
   candidates: string[]
-): Record<string, number> {
-  const result: Record<string, number> = {};
-  for (const candidate of candidates) {
-    const hostCapacity = swarmCapacity.hosts[candidate];
-    if (!hostCapacity) {
-      throw new Error(`candidate not in swarm: ${candidate}`);
-    }
+): [DockerNode, number][] {
+  const result: [DockerNode, number][] = [];
+  const candidateNodes = swarmCapacity.hosts.filter(([node]) =>
+    candidates.includes(node.hostname)
+  );
+  for (const [node, hostCapacity] of candidateNodes) {
     const { used, max } = hostCapacity;
     const free = max - used;
     const availableThreads = Math.floor(free / scriptRam);
     const allocatedThreads = Math.min(threads, availableThreads);
-    result[candidate] = allocatedThreads;
+    result.push([node, allocatedThreads]);
     threads -= allocatedThreads;
     if (threads <= 0) {
       break;

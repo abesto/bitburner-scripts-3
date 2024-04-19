@@ -1,16 +1,5 @@
 import { z } from "zod";
 
-export const SwarmCapacityEntry = z.object({
-  used: z.number(),
-  max: z.number(),
-});
-export type SwarmCapacityEntry = z.infer<typeof SwarmCapacityEntry>;
-export const SwarmCapacity = z.object({
-  total: SwarmCapacityEntry,
-  hosts: z.record(SwarmCapacityEntry),
-});
-export type SwarmCapacity = z.infer<typeof SwarmCapacity>;
-
 export const Labels = z.record(z.string());
 export type Labels = z.infer<typeof Labels>;
 
@@ -22,6 +11,29 @@ export type ServiceName = z.infer<typeof ServiceName>;
 
 export const Version = z.number();
 export type Version = z.infer<typeof Version>;
+
+export const DockerNode = z.object({
+  id: z.string(),
+  version: z.number(),
+  hostname: z.string(),
+  labels: Labels,
+});
+export type DockerNode = z.infer<typeof DockerNode>;
+
+export const SwarmCapacityData = z.object({
+  used: z.number(),
+  max: z.number(),
+});
+export type SwarmCapacityData = z.infer<typeof SwarmCapacityData>;
+
+export const SwarmCapacityEntry = z.tuple([DockerNode, SwarmCapacityData]);
+export type SwarmCapacityEntry = z.infer<typeof SwarmCapacityEntry>;
+
+export const SwarmCapacity = z.object({
+  total: SwarmCapacityData,
+  hosts: SwarmCapacityEntry.array(),
+});
+export type SwarmCapacity = z.infer<typeof SwarmCapacity>;
 
 export const PlacementConstraint = z
   .string()
@@ -69,7 +81,7 @@ export const Task = z.object({
   labels: Labels,
   spec: TaskSpec,
   serviceId: ServiceID,
-  hostname: z.string(), // instead of `NodeID` in real Docker
+  nodeId: z.string(),
   status: z.object({
     timestamp: z.string().datetime(),
     status: z.enum(["running", "complete", "shutdown", "failed"]),
@@ -181,5 +193,21 @@ export const API = z.object({
       })
     )
     .returns(z.string()),
+
+  nodeList: z.function().returns(DockerNode.array()),
+
+  nodeInspect: z
+    .function()
+    .args(z.string().describe("node ID or name"))
+    .returns(DockerNode),
+
+  nodeUpdate: z
+    .function()
+    .args(
+      z.string().describe("node ID"),
+      z.number().describe("version"),
+      Labels
+    )
+    .returns(z.literal("OK")),
 });
 export type API = z.infer<typeof API>;

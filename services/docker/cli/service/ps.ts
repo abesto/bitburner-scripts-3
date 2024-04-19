@@ -27,6 +27,9 @@ export const handler = async ({
 }: ArgumentsCamelCase<CliContext & PsOptions>) => {
   const docker = dockerClient(ns);
   const tasks = await docker.taskList({ filters: { service: [service] } });
+  const nodes = await docker.nodeList();
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+
   log.tinfo(
     "\n" +
       fmt
@@ -37,7 +40,7 @@ export const handler = async ({
             task.name,
             task.threads.toString(),
             task.pid.toString(),
-            task.hostname,
+            nodesById.get(task.nodeId)?.hostname ?? "<unknown>",
             fmt.memory(task.ram),
             task.status.status +
               " " +
