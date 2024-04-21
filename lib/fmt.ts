@@ -86,7 +86,7 @@ export class Fmt {
     for (const [prefix, fields] of strRows) {
       lines.push(
         `[${prefix.padStart(maxPrefixLength)}] ${fields
-          .map((field, i) => field.padEnd(maxColumnLengths[i]))
+          .map((field, i) => field.padEnd(maxColumnLengths[i] ?? 0))
           .join(" ")}`
       );
     }
@@ -96,15 +96,17 @@ export class Fmt {
 
   table(headers: string[], ...rows: string[][]): string[] {
     const maxColumnLengths = headers.map((header, i) =>
-      Math.max(header.length, ...rows.map((row) => row[i].length))
+      Math.max(header.length, ...rows.map((row) => row[i]?.length ?? 0))
     );
 
     return [
       headers
-        .map((header, i) => colors.white(header.padEnd(maxColumnLengths[i])))
+        .map((header, i) =>
+          colors.white(header.padEnd(maxColumnLengths[i] ?? 0))
+        )
         .join("\t"),
       ...rows.map((row) =>
-        row.map((field, i) => field.padEnd(maxColumnLengths[i])).join("\t")
+        row.map((field, i) => field.padEnd(maxColumnLengths[i] ?? 0)).join("\t")
       ),
     ];
   }
@@ -112,7 +114,8 @@ export class Fmt {
   parseMoney(x: string | number): number {
     if (typeof x === "string") {
       const [, num, suffix] = x.match(/^\$?([0-9.]+)([a-z]?)$/i) || [];
-      return parseFloat(num) * 10 ** (MoneySuffixes[suffix] || 0);
+      if (!num) throw new Error(`invalid money: ${x}`);
+      return parseFloat(num) * 10 ** (suffix ? MoneySuffixes[suffix] ?? 0 : 0);
     }
     return x;
   }
