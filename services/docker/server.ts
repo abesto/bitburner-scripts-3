@@ -13,6 +13,7 @@ import {
   DockerNode,
   PlacementConstraint,
   Service,
+  ServiceID,
   ServiceStatus,
   SwarmCapacityData,
   SwarmCapacityEntry,
@@ -29,6 +30,7 @@ import {
 import { RunOptions } from "NetscriptDefinitions";
 import { maybeZodErrorMessage } from "lib/error";
 import { LABELS } from "./constants";
+import { DockerCrontab } from "./crontab";
 
 const REDIS_KEYS = {
   NODES: "docker:nodes",
@@ -59,6 +61,7 @@ export class DockerService
 {
   private readonly redis: RedisClient;
   private readonly timers: TimerEventProvider;
+  private readonly crontab: DockerCrontab;
 
   constructor(ns: NS) {
     super(ns);
@@ -82,14 +85,41 @@ export class DockerService
       block: Infinity,
       handler: this.processExited,
     });
+    this.crontab = new DockerCrontab(
+      this.timers,
+      this.handleCronjob.bind(this)
+    );
   }
 
   override async setup() {
     await this.doSwarmJoin("home");
+    for (const service of await this.lookupAllServices()) {
+      this.registerCronjob(service);
+    }
     this.timers.setInterval(() => this.keepalive(), 10000);
   }
 
-  async keepalive() {
+  private registerCronjob(service: Service) {
+    if (service.spec.labels[LABELS.CRONJOB_ENABLED] !== "true") {
+      return;
+    }
+
+    const schedule = service.spec.labels[LABELS.CRONJOB_SCHEDULE];
+    if (schedule === undefined) {
+      throw new Error(
+        `cronjob schedule missing for service ${service.spec.name}`
+      );
+    }
+
+    if (service.spec.mode.type !== "replicated-job") {
+      throw new Error(
+        `service ${service.spec.name} must be a replicated-job service for use as cronjob, actual type is ${service.spec.mode.type}`
+      );
+    }
+    this.crontab.set(service.id, schedule);
+  }
+
+  private async keepalive() {
     // TODO respect restartPolicy.delay & maxAttempts
     const services = await this.lookupAllServices();
     const deadTasks: Task[] = [];
@@ -140,7 +170,7 @@ export class DockerService
     }
   }
 
-  scaleDown = async (service: Service) => {
+  private scaleDown = async (service: Service) => {
     const tasks = await this.lookupTasks(service.id);
 
     const { desiredThreads, runningThreads } = this.serviceStatus(
@@ -182,7 +212,7 @@ export class DockerService
     );
   };
 
-  scaleUp = async (service: Service) => {
+  private scaleUp = async (service: Service) => {
     const name = service.spec.name;
     const oldTasks = await this.lookupTasks(service.id);
 
@@ -197,7 +227,7 @@ export class DockerService
 
     const script = service.spec.taskTemplate.containerSpec.command;
     const scriptRam =
-      service.spec.taskTemplate.resources?.memoryGigabytes ??
+      service.spec.taskTemplate.resources?.memory ??
       this.ns.getScriptRam(script);
     const capacity = await this.getSwarmCapacity();
     const hostnames = service.spec.taskTemplate.placement.constraints
@@ -267,10 +297,20 @@ export class DockerService
           `failed to start task execArgs=${JSON.stringify(execArgs)}`
         );
       }
+
+      let taskNumber = tasks.length + oldTasks.length + 1;
+      let taskName = `${name}.${taskNumber.toString()}`;
+      while (
+        oldTasks.some((t) => t.name === taskName) ||
+        tasks.some((t) => t.name === taskName)
+      ) {
+        taskName = `${name}.${(++taskNumber).toString()}`;
+      }
+
       tasks.push({
         id: taskId,
         version: 0,
-        name: `${name}.${(tasks.length + oldTasks.length + 1).toString()}`,
+        name: taskName,
         labels: service.spec.taskTemplate.containerSpec.labels,
         spec: service.spec.taskTemplate,
         serviceId: service.id,
@@ -340,6 +380,43 @@ export class DockerService
     }
     return { total, hosts };
   };
+
+  private async handleCronjob(serviceId: ServiceID) {
+    const service = await this.lookupService(serviceId);
+    if (service === null) {
+      this.log.error("crontab", { serviceId, error: "not-found" });
+      return;
+    }
+
+    const mode = service.spec.mode;
+    if (mode.type !== "replicated-job") {
+      this.log.error("crontab", { serviceId, error: "invalid-mode", mode });
+      return;
+    }
+
+    // TODO make max history configurable
+    const maxJobs = 5;
+
+    mode.totalCompletions = Math.min(maxJobs, mode.totalCompletions + 1);
+    mode.maxConcurrent = 1; // TODO this is kind of a hack, should be configurable
+    const tasks = await this.lookupTasks(service.id);
+    while (tasks.length >= mode.totalCompletions) {
+      const task = tasks.shift();
+      if (task === undefined) {
+        throw new Error("impossible");
+      }
+      if (task.status.status === "running") {
+        break;
+      }
+      await this.redis.srem(REDIS_KEYS.TASKS(service.id), [task.id]);
+      await this.redis.del([
+        REDIS_KEYS.TASK(service.id, task.id),
+        REDIS_KEYS.PID_TO_TASK(task.pid),
+      ]);
+    }
+
+    await this.scaleUp(service);
+  }
 
   swarmCapacity = async (req: Request, res: Res) => {
     API.shape.swarmCapacity.parameters().parse(req.args);
@@ -423,6 +500,7 @@ export class DockerService
       },
     };
 
+    this.registerCronjob(service);
     await this.redis.sadd(REDIS_KEYS.SERVICES, [serviceId]);
     await this.redis.mset({
       [REDIS_KEYS.SERVICE_BY_NAME(name)]: serviceId,
@@ -566,6 +644,7 @@ export class DockerService
       ...tasks.map((t) => REDIS_KEYS.PID_TO_TASK(t.pid)),
     ]);
     await this.redis.srem(REDIS_KEYS.SERVICES, [service.id]);
+    this.crontab.remove(service.id);
     await res.success(API.shape.serviceDelete.returnType().parse("OK"));
   };
 
@@ -638,6 +717,7 @@ export class DockerService
 
     await this.scaleDown(service);
     await this.scaleUp(service);
+    this.registerCronjob(service);
 
     await res.success(API.shape.serviceUpdate.returnType().parse("OK"));
   };

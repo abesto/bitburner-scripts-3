@@ -48,6 +48,11 @@ const ComposeFile = z.object({
             mode: z.enum(["replicated", "replicated-job"]).optional(),
             replicas: z.number().optional(),
             placement: Placement.optional(),
+            resources: z
+              .object({
+                memory: z.number(),
+              })
+              .optional(),
           })
           .optional(),
       })
@@ -113,6 +118,8 @@ export const handler = async ({
         taskTemplate: {
           ...service.spec.taskTemplate,
           placement: placement ?? service.spec.taskTemplate.placement,
+          resources:
+            spec.deploy?.resources ?? service.spec.taskTemplate.resources,
           containerSpec: {
             ...service.spec.taskTemplate.containerSpec,
             labels,
@@ -129,6 +136,7 @@ export const handler = async ({
         labels,
         taskTemplate: {
           placement: placement ?? { constraints: [] },
+          resources: spec.deploy?.resources,
           restartPolicy: { condition: "any", delay: 0, maxAttempts: 0 },
           containerSpec: {
             args: spec.args ?? [],

@@ -3,8 +3,9 @@ import { withExitCode } from "lib/exitcode";
 import { Log } from "lib/log";
 import { ArgumentsCamelCase } from "yargs";
 
-export const main = (ns: NS) =>
-  withExitCode(
+export const main = (ns: NS) => {
+  const log = new Log(ns, "payload");
+  return withExitCode(
     cliMain(
       "payload",
       makeCli({
@@ -18,6 +19,15 @@ export const main = (ns: NS) =>
             yargs.positional("seconds", { type: "number", demandOption: true }),
           handler: async ({ ns, seconds }) => {
             await ns.sleep(seconds * 1000);
+          },
+        })
+        .command({
+          command: "echo <message>",
+          describe: "Echo a message",
+          builder: (yargs) =>
+            yargs.positional("message", { type: "string", demandOption: true }),
+          handler: ({ message }) => {
+            log.tinfo(message);
           },
         })
         .command({
@@ -73,3 +83,4 @@ export const main = (ns: NS) =>
         })
     )
   )(ns);
+};

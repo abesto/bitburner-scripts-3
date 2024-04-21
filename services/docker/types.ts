@@ -59,7 +59,7 @@ export const TaskSpec = z.object({
   }),
   resources: z
     .object({
-      memoryGigabytes: z.number().optional(), // per thread; goes into ns.exec RunOptions
+      memory: z.number().optional().describe("Memory limit in GB per thread"),
     })
     .optional(),
   restartPolicy: z.object({

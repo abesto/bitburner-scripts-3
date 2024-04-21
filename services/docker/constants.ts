@@ -22,4 +22,8 @@ export const LABELS = {
    * Name of the service, as defined in the Compose file
    */
   STACK_SERVICE_NAME: "com.docker.stack.service.name",
+
+  // Roughly as seen in https://crazymax.dev/swarm-cronjob/usage/docker-labels/
+  CRONJOB_ENABLED: "swarm.cronjob.enabled",
+  CRONJOB_SCHEDULE: "swarm.cronjob.schedule",
 };

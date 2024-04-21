@@ -124,7 +124,7 @@ export const handler = async (
         constraints,
       },
       resources: {
-        memoryGigabytes: limitMemory,
+        memory: limitMemory,
       },
     },
     mode: modeSpec,

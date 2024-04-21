@@ -1,0 +1,14 @@
+version: "3.8-bb"
+
+services:
+  sayhi:
+    command: payload.js
+    args: ["echo", "look at this cronjob every 10 seconds"]
+    deploy:
+      labels:
+        swarm.cronjob.enabled: "true"
+        swarm.cronjob.schedule: "*/10 * * * * *"
+      mode: replicated-job
+      replicas: 0
+      resources:
+        memory: 1.6

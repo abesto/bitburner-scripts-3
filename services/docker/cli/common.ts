@@ -36,7 +36,7 @@ export const printServiceList = (
             service.spec.name,
             threads(service),
             service.spec.taskTemplate.containerSpec.command,
-            service.spec.taskTemplate.containerSpec.args.slice(1).join(" "),
+            service.spec.taskTemplate.containerSpec.args.join(" "),
             service.spec.taskTemplate.restartPolicy.condition,
           ])
         )
