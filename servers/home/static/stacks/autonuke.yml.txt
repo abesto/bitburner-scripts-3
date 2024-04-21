@@ -1,0 +1,12 @@
+version: "3.8-bb"
+
+# Autonuke every minute
+services:
+  main:
+    command: autonuke.js
+    deploy:
+      labels:
+        swarm.cronjob.enabled: "true"
+        swarm.cronjob.schedule: "* * * * *"
+      mode: replicated-job
+      replicas: 0
