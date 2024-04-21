@@ -27,13 +27,16 @@ export const makeCli = (opts: { name: string; describe: string }) =>
     .demandCommand()
     .wrap(120);
 
+export const parseNsArgs: (ns: NS) => string[] = (ns) =>
+  z
+    .union([z.string(), z.number(), z.boolean()])
+    .transform((x) => x.toString())
+    .array()
+    .parse(ns.args);
+
 export const cliMain =
   (name: string, cli: Argv<CliContext>) => async (ns: NS) => {
-    const rawArgs = z
-      .union([z.string(), z.number(), z.boolean()])
-      .transform((x) => x.toString())
-      .array()
-      .parse(ns.args);
+    const rawArgs = parseNsArgs(ns);
 
     const ctx = cliContext(ns, name);
 

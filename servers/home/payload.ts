@@ -4,7 +4,6 @@ import { Log } from "lib/log";
 import { ArgumentsCamelCase } from "yargs";
 
 export const main = (ns: NS) => {
-  const log = new Log(ns, "payload");
   return withExitCode(
     cliMain(
       "payload",
@@ -26,7 +25,7 @@ export const main = (ns: NS) => {
           describe: "Echo a message",
           builder: (yargs) =>
             yargs.positional("message", { type: "string", demandOption: true }),
-          handler: ({ message }) => {
+          handler: ({ message, log }) => {
             log.tinfo(message);
           },
         })

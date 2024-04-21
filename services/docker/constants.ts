@@ -27,3 +27,22 @@ export const LABELS = {
   CRONJOB_ENABLED: "swarm.cronjob.enabled",
   CRONJOB_SCHEDULE: "swarm.cronjob.schedule",
 };
+
+export const REDIS_KEYS = {
+  /**
+   * Redis key under which Docker events are published (stream)
+   */
+  EVENTS: "docker.events",
+
+  NODES: "docker:nodes",
+  NODE: (id: string) => `docker:node:${id}`,
+
+  SERVICES: "docker:services",
+  SERVICE: (id: string) => `docker:service:${id}`,
+  SERVICE_BY_NAME: (name: string) => `docker:servicebyname:${name}`,
+
+  TASKS: (serviceId: string) => `docker:service:${serviceId}:tasks`,
+  TASK: (serviceId: string, taskId: string) =>
+    `docker:service:${serviceId}:task:${taskId}`,
+  PID_TO_TASK: (pid: number) => `docker:pid:${pid.toString()}`, // value: Redis key of the task (docker:service:ID:task:ID)
+};

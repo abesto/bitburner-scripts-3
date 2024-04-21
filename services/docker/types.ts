@@ -223,3 +223,11 @@ export const API = z.object({
     .returns(z.literal("OK")),
 });
 export type API = z.infer<typeof API>;
+
+export const DockerEvent = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("replicated-job-fulfilled"),
+    serviceId: ServiceID,
+  }),
+]);
+export type DockerEvent = z.infer<typeof DockerEvent>;

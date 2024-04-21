@@ -29,22 +29,8 @@ import {
 } from "lib/TimerManager";
 import { RunOptions } from "NetscriptDefinitions";
 import { maybeZodErrorMessage } from "lib/error";
-import { LABELS } from "./constants";
+import { LABELS, REDIS_KEYS } from "./constants";
 import { DockerCrontab } from "./crontab";
-
-const REDIS_KEYS = {
-  NODES: "docker:nodes",
-  NODE: (id: string) => `docker:node:${id}`,
-
-  SERVICES: "docker:services",
-  SERVICE: (id: string) => `docker:service:${id}`,
-  SERVICE_BY_NAME: (name: string) => `docker:servicebyname:${name}`,
-
-  TASKS: (serviceId: string) => `docker:service:${serviceId}:tasks`,
-  TASK: (serviceId: string, taskId: string) =>
-    `docker:service:${serviceId}:task:${taskId}`,
-  PID_TO_TASK: (pid: number) => `docker:pid:${pid.toString()}`, // value: Redis key of the task (docker:service:ID:task:ID)
-};
 
 const ID_BYTES = 8;
 
@@ -205,10 +191,10 @@ export class DockerService
       toKill.map((t) => t.id) as [string, ...string[]]
     );
     await this.redis.del(
-      toKill.map((t) => REDIS_KEYS.TASK(service.id, t.id)) as [
-        string,
-        ...string[]
-      ]
+      toKill.flatMap((t) => [
+        REDIS_KEYS.TASK(service.id, t.id),
+        REDIS_KEYS.PID_TO_TASK(t.pid),
+      ]) as [string, ...string[]]
     );
   };
 
@@ -738,6 +724,28 @@ export class DockerService
       status: success ? "complete" : "failed",
     };
     await this.redis.set(taskKey, JSON.stringify(task), {});
+
+    const service = await this.lookupService(task.serviceId);
+    if (service === null) {
+      this.log.error("service-gone", { task });
+      return;
+    }
+    if (service.spec.mode.type === "replicated-job") {
+      const status = this.serviceStatus(
+        service,
+        await this.lookupTasks(service.id)
+      );
+      if (status.completedThreads >= service.spec.mode.totalCompletions) {
+        const event = {
+          type: JSON.stringify("replicated-job-fulfilled"),
+          serviceId: JSON.stringify(service.id),
+        };
+        await this.redis.xadd(REDIS_KEYS.EVENTS, "*", Object.entries(event), {
+          type: "maxlen",
+          count: 20, // TODO make count configurable
+        });
+      }
+    }
   };
 
   taskRegister = async (req: Request, res: Res) => {

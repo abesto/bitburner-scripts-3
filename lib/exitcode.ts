@@ -1,6 +1,9 @@
 import { EventMultiplexer, EventProvider } from "rpc/server";
-import { RedisClient, redisClient } from "services/redis/client";
-import { RawStream } from "services/redis/types";
+import {
+  RedisClient,
+  StreamSubscriber,
+  redisClient,
+} from "services/redis/client";
 import { z } from "zod";
 
 export const ExitCodeEvent = z.object({
@@ -40,31 +43,9 @@ export const withExitCode =
     return result;
   };
 
-export class ExitCodeSubscriber {
-  private readonly redis: RedisClient;
-  private lastSeen = "$";
-
-  constructor(ns: NS) {
-    this.redis = redisClient(ns);
-  }
-
-  async poll(block?: number, count?: number): Promise<ExitCodeEvent[]> {
-    const streams = await this.redis.xread({
-      streams: [[KEY, this.lastSeen]],
-      block,
-      count: count ?? (block === undefined ? undefined : 1),
-    });
-    const stream: RawStream = streams[KEY] ?? [];
-    if (stream.length === 0) {
-      return [];
-    }
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    this.lastSeen = stream[stream.length - 1]![0];
-    return stream.map(([, kvs]) =>
-      ExitCodeEvent.parse(
-        Object.fromEntries(kvs.map(([k, v]) => [k, JSON.parse(v)]))
-      )
-    );
+export class ExitCodeSubscriber extends StreamSubscriber<ExitCodeEvent> {
+  constructor(redis: ReturnType<typeof redisClient>) {
+    super(redis, KEY, (event) => ExitCodeEvent.parse(event));
   }
 }
 
@@ -80,7 +61,7 @@ export class ExitCodeEventProvider
   private queue: ExitCodeEvent[] = [];
 
   constructor(ns: NS, private readonly block: number) {
-    this.subscriber = new ExitCodeSubscriber(ns);
+    this.subscriber = new ExitCodeSubscriber(redisClient(ns));
   }
 
   next: () => Promise<ExitCodeServerEvent> = async () => {
